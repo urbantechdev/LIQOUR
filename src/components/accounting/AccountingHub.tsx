@@ -53,7 +53,6 @@ export const AccountingHub: React.FC = () => {
     orders, 
     mpesaTransactions, 
     runMpesaAutoReconciliation, 
-    simulateDarajaIncomingPayment,
     chartOfAccounts, 
     journalEntries,
     postManualJournalEntry,
@@ -76,13 +75,6 @@ export const AccountingHub: React.FC = () => {
   const [drAccount, setDrAccount] = useState('1030');
   const [crAccount, setCrAccount] = useState('4010');
   const [manualAmount, setManualAmount] = useState<number>(50000);
-
-  // Daraja Simulation State
-  const [isSimulateModalOpen, setIsSimulateModalOpen] = useState(false);
-  const [simAmount, setSimAmount] = useState<number>(4200);
-  const [simPhone, setSimPhone] = useState<string>('254712345678');
-  const [simBillRef, setSimBillRef] = useState<string>('');
-  const [simType, setSimType] = useState<'Paybill' | 'Buy Goods Till'>('Buy Goods Till');
 
   // Calculate VAT totals
   const totalTaxable = etimsInvoices.reduce((acc, inv) => acc + inv.taxableAmount, 0);
@@ -122,12 +114,6 @@ export const AccountingHub: React.FC = () => {
     const res = runMpesaAutoReconciliation();
     setReconcileResult({ count: res.matchedCount, amount: res.matchedAmount });
     setTimeout(() => setReconcileResult(null), 5000);
-  };
-
-  const handleSimulatePayment = (e: React.FormEvent) => {
-    e.preventDefault();
-    simulateDarajaIncomingPayment(simAmount, simPhone, simBillRef || 'ORD-2026-1049', simType);
-    setIsSimulateModalOpen(false);
   };
 
   const handlePostManualJe = (e: React.FormEvent) => {
@@ -601,14 +587,6 @@ export const AccountingHub: React.FC = () => {
 
             <div className="flex items-center space-x-2">
               <button
-                onClick={() => setIsSimulateModalOpen(true)}
-                className="px-3.5 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl text-xs font-montserrat font-bold transition flex items-center gap-1.5"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-[#0A006E]" />
-                <span>Simulate STK / Webhook</span>
-              </button>
-
-              <button
                 onClick={handleRunReconciliation}
                 className="px-4 py-2 bg-[#34D186] text-white hover:bg-[#34D186]/90 rounded-xl text-xs font-montserrat font-bold transition flex items-center gap-1.5 shadow-sm"
               >
@@ -799,83 +777,6 @@ export const AccountingHub: React.FC = () => {
           order={selectedOrder}
           onClose={() => setSelectedInvoice(null)}
         />
-      )}
-
-      {/* Simulate Daraja Payment Modal */}
-      {isSimulateModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl border border-slate-200 animate-in fade-in">
-            <h3 className="font-montserrat font-black text-lg text-slate-900 mb-1">
-              Simulate Safaricom Daraja C2B Payment
-            </h3>
-            <p className="text-xs text-slate-500 mb-4">
-              Simulates webhook payload from Safaricom API to test automated invoice clearing.
-            </p>
-
-            <form onSubmit={handleSimulatePayment} className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Transaction Type</label>
-                <select
-                  value={simType}
-                  onChange={(e) => setSimType(e.target.value as any)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs"
-                >
-                  <option value="Buy Goods Till">Buy Goods Till (Till 829102)</option>
-                  <option value="Paybill">Paybill (Shortcode 4082211)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Amount (KES)</label>
-                <input
-                  type="number"
-                  value={simAmount}
-                  onChange={(e) => setSimAmount(parseFloat(e.target.value) || 0)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono font-bold"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Customer Phone Number</label>
-                <input
-                  type="text"
-                  value={simPhone}
-                  onChange={(e) => setSimPhone(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Bill Reference / Order Number</label>
-                <input
-                  type="text"
-                  value={simBillRef}
-                  onChange={(e) => setSimBillRef(e.target.value)}
-                  placeholder="e.g. ORD-2026-1049"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono"
-                />
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsSimulateModalOpen(false)}
-                  className="flex-1 py-2 px-3 border border-slate-300 rounded-lg text-xs font-bold text-slate-700"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2 px-3 bg-[#34D186] text-white rounded-lg text-xs font-montserrat font-bold hover:bg-[#34D186]/90"
-                >
-                  Trigger Daraja Webhook
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
       )}
 
     </div>

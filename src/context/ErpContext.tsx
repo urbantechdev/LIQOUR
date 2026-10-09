@@ -354,7 +354,6 @@ interface ErpContextType {
   // M-Pesa & Reconciliation
   mpesaTransactions: MpesaTransaction[];
   runMpesaAutoReconciliation: () => { matchedCount: number; matchedAmount: number };
-  simulateDarajaIncomingPayment: (amount: number, phone: string, billRef: string, type?: 'Paybill' | 'Buy Goods Till') => MpesaTransaction;
 
   // Accounting & Ledgers
   chartOfAccounts: ChartAccount[];
@@ -6339,31 +6338,6 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { matchedCount, matchedAmount };
   };
 
-  const simulateDarajaIncomingPayment = (
-    amount: number,
-    phone: string,
-    billRef: string,
-    type: 'Paybill' | 'Buy Goods Till' = 'Buy Goods Till'
-  ): MpesaTransaction => {
-    const receiptNumber = `TI84X${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
-    const newTx: MpesaTransaction = {
-      id: `mpesa-${Date.now()}`,
-      receiptNumber,
-      transactionType: type,
-      phoneNumber: phone,
-      customerName: 'SAFARICOM DARAJA C2B SIMULATION',
-      amountKes: amount,
-      shortCode: type === 'Paybill' ? '4082211' : '829102',
-      billRefNumber: billRef,
-      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-      status: 'PENDING',
-      autoReconciled: false
-    };
-
-    setMpesaTransactions(prev => [newTx, ...prev]);
-    return newTx;
-  };
-
   const postManualJournalEntry = (entryData: Omit<JournalEntry, 'id' | 'entryNumber'>) => {
     const newEntry: JournalEntry = {
       ...entryData,
@@ -9621,7 +9595,6 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         completeWebsiteDeliveryOrderWithMpesaPrompt,
         mpesaTransactions,
         runMpesaAutoReconciliation,
-        simulateDarajaIncomingPayment,
         chartOfAccounts,
         journalEntries,
         postManualJournalEntry,

@@ -154,20 +154,32 @@ export function getRolePermissions(role: ExtendedErpRole, department: Department
     return {
       role: 'ACCOUNTANT',
       department,
-      allowedTabs: ['ACCOUNTING'],
-      defaultTab: 'ACCOUNTING',
-      description: 'Strictly scoped CPA Financial Ledger access: Automated 16% VAT tax logs, General Ledger, Commercial Invoicing, and M-Pesa reconciliation.',
+      allowedTabs: [
+        'DASHBOARD',
+        'ANALYTICS',
+        'ACCOUNTING',
+        'DELIVERY_DASHBOARD',
+        'SALES_MANAGER_DASHBOARD',
+        'INVENTORY',
+        'AFFILIATES',
+        'RESTOCK',
+        'POS'
+      ],
+      defaultTab: department === 'INVENTORY' ? 'INVENTORY' : department === 'POS' ? 'POS' : 'ACCOUNTING',
+      description: 'Full financial ledger access, automated 16% VAT tax logs, M-Pesa reconciliation dashboard, and inventory control.',
       canModifyBranchStructure: false,
       canOverridePricing: false,
       canAccessGeneralLedger: true,
       canAccessEtimsLogs: true,
-      canProcessSales: false,
-      canAccessHrPayroll: false,
+      canProcessSales: true,
+      canAccessHrPayroll: department === 'HR_PAYROLL',
       isRestricted: true,
       allBranchesAccess: true,
-      maxDiscountPercent: 0,
+      maxDiscountPercent: 15,
       permissions: [
         'sales.view',
+        'sales.create',
+        'sales.refund',
         'inventory.view',
         'invoice.view',
         'invoice.create',
@@ -185,9 +197,9 @@ export function getRolePermissions(role: ExtendedErpRole, department: Department
     return {
       role: 'STAFF',
       department,
-      allowedTabs: ['ANALYTICS'],
+      allowedTabs: ['DASHBOARD', 'ANALYTICS'],
       defaultTab: 'ANALYTICS',
-      description: 'Read-only reporting and analytics access strictly limited to the Analytics module for authorized branches.',
+      description: 'Read-only reporting and executive analytics access across authorized branches.',
       canModifyBranchStructure: false,
       canOverridePricing: false,
       canAccessGeneralLedger: false,
@@ -221,10 +233,10 @@ export function getRolePermissions(role: ExtendedErpRole, department: Department
       return {
         role: 'STAFF',
         department: effectiveDepartment,
-        allowedTabs: ['BRANCHES'],
+        allowedTabs: ['BRANCHES', 'ANALYTICS', 'POS', 'INVENTORY', 'RESTOCK', 'DELIVERY_DASHBOARD', 'SALES_MANAGER_DASHBOARD'],
         defaultTab: 'BRANCHES',
-        description: 'Branch Manager dashboard only. Creates Counter Cashiers & issues 6-digit login PINs and oversees operations strictly for their assigned branch.',
-        canModifyBranchStructure: false,
+        description: 'Branch Manager dashboard. Creates Counter Cashiers & issues 6-digit login PINs, oversees branch operations, inventory, restocks, and POS terminals.',
+        canModifyBranchStructure: true,
         canOverridePricing: false,
         canAccessGeneralLedger: false,
         canAccessEtimsLogs: true,
@@ -258,7 +270,7 @@ export function getRolePermissions(role: ExtendedErpRole, department: Department
         department: effectiveDepartment,
         allowedTabs: ['DELIVERY_DASHBOARD'],
         defaultTab: 'DELIVERY_DASHBOARD',
-        description: 'Branch Delivery Manager dashboard only. Coordinates customer deliveries, rider dispatch, and monitors orders strictly for their assigned branch.',
+        description: 'Branch Delivery Manager dashboard. Coordinates customer deliveries, rider dispatch, and monitors all orders made from their branch.',
         canModifyBranchStructure: false,
         canOverridePricing: false,
         canAccessGeneralLedger: false,
@@ -275,9 +287,9 @@ export function getRolePermissions(role: ExtendedErpRole, department: Department
       return {
         role: 'STAFF',
         department: effectiveDepartment,
-        allowedTabs: ['SALES_MANAGER_DASHBOARD'],
+        allowedTabs: ['SALES_MANAGER_DASHBOARD', 'ANALYTICS', 'AFFILIATES'],
         defaultTab: 'SALES_MANAGER_DASHBOARD',
-        description: 'Branch Sales Manager dashboard only. Manages branch sales affiliates, monitors branch orders, and tracks affiliated persons performance strictly for their assigned branch.',
+        description: 'Branch Sales Manager dashboard. Manages branch sales affiliates, monitors orders made from their branch, and tracks affiliated persons performance per Day, Week, Month, and Year.',
         canModifyBranchStructure: false,
         canOverridePricing: false,
         canAccessGeneralLedger: false,
@@ -287,16 +299,7 @@ export function getRolePermissions(role: ExtendedErpRole, department: Department
         isRestricted: true,
         allBranchesAccess: false,
         maxDiscountPercent: 10,
-        permissions: [
-          'sales.view',
-          'sales.edit',
-          'invoice.view',
-          'invoice.create',
-          'users.view',
-          'users.create',
-          'users.edit',
-          'reports.view'
-        ]
+        permissions: ['sales.view', 'sales.edit', 'invoice.view', 'invoice.create', 'users.view', 'reports.view']
       };
 
     case 'POS':

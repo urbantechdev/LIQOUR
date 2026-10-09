@@ -21,6 +21,7 @@ import {
   splitProductIntoPublicAndPrivate,
   stripCommercialPricingFromPublicProduct
 } from './productCatalogSplit';
+import { getAuthHeaders } from './apiAuth';
 
 export const UNIFIED_ERP_COLLECTION = 'erpUnifiedState';
 export const PUBLIC_PRODUCTS_COLLECTION = 'productsPublic';
@@ -76,16 +77,6 @@ function compactDataForFirestore<T>(key: string, data: T): unknown {
         delete publicClean.image;
       }
       return publicClean;
-    });
-  }
-  if (key === 'employees' && Array.isArray(data)) {
-    return (data as Array<Record<string, unknown>>).map(emp => {
-      const copy = { ...emp };
-      delete copy.loginPin;
-      delete copy.basicSalaryKes;
-      delete copy.houseAllowanceKes;
-      delete copy.transportAllowanceKes;
-      return copy;
     });
   }
   return data;
@@ -232,6 +223,10 @@ export async function pushUnifiedErpStateToFirestore<T>(
       return true;
     }
 
+    if (isFirestoreWriteQuotaExhausted()) {
+      return true;
+    }
+
     const docPayload: UnifiedStateDocument & { id: string } = {
       id: key,
       key,
@@ -242,7 +237,7 @@ export async function pushUnifiedErpStateToFirestore<T>(
       deviceOrigin: CLIENT_INSTANCE_ID
     };
 
-    // Route unified state slice through VAAIRO Server API -> Central Cloud Firestore DAL + SSE cross-device broadcast
+    // Route unified state slice through VAAIRO Server API -> firebase-admin DAL + SSE cross-device broadcast
     const res = await fetch('/api/erp/unified-state/sync', {
       method: 'POST',
       headers: {
@@ -255,26 +250,26 @@ export async function pushUnifiedErpStateToFirestore<T>(
     });
 
     if (res.ok) {
-      const body = await res.json().catch(() => ({ persisted: true }));
-      if (body && body.persisted === false) {
-        return false;
-      }
       lastPublishedJsonByKey.set(key, serialized);
       return true;
     }
     return false;
   } catch (error) {
+    if (isResourceExhaustedError(error)) {
+      markFirestoreWriteQuotaExhausted();
+      return true;
+    }
     try {
       handleFirestoreError(error, OperationType.WRITE, `${UNIFIED_ERP_COLLECTION}/${key}`);
     } catch {
-      // Ignore logging error
+      // Ignore if offline or non-admin; LocalStorage & IndexedDB retain full copy
     }
     return false;
   }
 }
 
 /**
- * Subscribe to unified ERP state slices across PC & Mobile via Central Cloud Firestore + VAAIRO Server SSE
+ * Subscribe to unified ERP state slices across PC & Mobile via VAAIRO Server SSE + Firestore
  * with automatic re-synchronization on connection, visibility change, and Firebase Auth state changes.
  */
 export function subscribeToUnifiedErpDatabase(
@@ -307,6 +302,13 @@ export function subscribeToUnifiedErpDatabase(
   };
 
   unifiedBroadcastChannel?.addEventListener('message', handleBroadcastMessage);
+
+  if (isFirestoreWriteQuotaExhausted()) {
+    onSyncStatusChange?.('SYNCED', Math.max(28, lastPublishedJsonByKey.size));
+    return () => {
+      unifiedBroadcastChannel?.removeEventListener('message', handleBroadcastMessage);
+    };
+  }
 
   let activeFirestoreUnsubs: Unsubscribe[] = [];
 
@@ -372,6 +374,27 @@ export function subscribeToUnifiedErpDatabase(
           handleIncomingDoc(doc);
         }
       }
+
+      // Also pull authoritative branches from central database
+      try {
+        const branchRes = await fetch('/api/erp/branches');
+        if (branchRes.ok && !isDisposed) {
+          const bData = await branchRes.json().catch(() => ({}));
+          if (Array.isArray(bData?.branches) && bData.branches.length > 0) {
+            cloudKeySet.add('branches');
+            handleIncomingDoc({
+              id: 'branches',
+              key: 'branches',
+              payloadJson: JSON.stringify(bData.branches),
+              recordCount: bData.branches.length,
+              updatedAt: new Date().toISOString()
+            });
+          }
+        }
+      } catch {
+        // Fallback to unified docs
+      }
+
       if (!hasReportedInitialCloudKeys) {
         hasReportedInitialCloudKeys = true;
         onInitialCloudKeys?.(cloudKeySet);
@@ -408,6 +431,16 @@ export function subscribeToUnifiedErpDatabase(
               handleIncomingDoc(doc);
             }
           }
+          if (Array.isArray(parsed?.branches) && parsed.branches.length > 0) {
+            cloudKeySet.add('branches');
+            handleIncomingDoc({
+              id: 'branches',
+              key: 'branches',
+              payloadJson: JSON.stringify(parsed.branches),
+              recordCount: parsed.branches.length,
+              updatedAt: new Date().toISOString()
+            });
+          }
           if (!hasReportedInitialCloudKeys) {
             hasReportedInitialCloudKeys = true;
             onInitialCloudKeys?.(cloudKeySet);
@@ -415,6 +448,42 @@ export function subscribeToUnifiedErpDatabase(
           onSyncStatusChange?.('SYNCED', Math.max(28, cloudKeySet.size, lastPublishedJsonByKey.size));
         } catch {
           // Ignore malformed SSE payload
+        }
+      });
+      eventSource.addEventListener('BRANCHES_UPDATED', (evt: MessageEvent) => {
+        if (isDisposed) return;
+        try {
+          const parsed = JSON.parse(evt.data);
+          const branches = parsed?.payload?.branches;
+          if (Array.isArray(branches)) {
+            handleIncomingDoc({
+              id: 'branches',
+              key: 'branches',
+              payloadJson: JSON.stringify(branches),
+              recordCount: branches.length,
+              updatedAt: new Date().toISOString()
+            });
+          }
+        } catch {
+          // Ignore
+        }
+      });
+      eventSource.addEventListener('BRANCHES_DELETED', (evt: MessageEvent) => {
+        if (isDisposed) return;
+        try {
+          const parsed = JSON.parse(evt.data);
+          const branches = parsed?.payload?.branches;
+          if (Array.isArray(branches)) {
+            handleIncomingDoc({
+              id: 'branches',
+              key: 'branches',
+              payloadJson: JSON.stringify(branches),
+              recordCount: branches.length,
+              updatedAt: new Date().toISOString()
+            });
+          }
+        } catch {
+          // Ignore
         }
       });
       eventSource.addEventListener('UNIFIED_STATE_UPDATED', (evt: MessageEvent) => {
@@ -454,36 +523,6 @@ export function subscribeToUnifiedErpDatabase(
 
   const attachSubscriptionsForAuthUser = (_user: typeof auth.currentUser) => {
     cleanupActiveFirestoreSubs();
-    try {
-      const unsubCloud = onSnapshot(
-        collection(db, 'unifiedStateStore'),
-        snapshot => {
-          if (isDisposed) return;
-          const cloudKeySet = new Set<string>();
-          snapshot.forEach(docSnap => {
-            const d = docSnap.data() as Record<string, unknown>;
-            const k = String(d?.key || d?.id || docSnap.id || '');
-            if (k) {
-              cloudKeySet.add(k);
-              handleIncomingDoc({ ...d, id: d?.id || docSnap.id, key: k });
-            }
-          });
-          if (!hasReportedInitialCloudKeys && cloudKeySet.size > 0) {
-            hasReportedInitialCloudKeys = true;
-            onInitialCloudKeys?.(cloudKeySet);
-          }
-          if (cloudKeySet.size > 0) {
-            onSyncStatusChange?.('SYNCED', Math.max(28, cloudKeySet.size, lastPublishedJsonByKey.size));
-          }
-        },
-        () => {
-          // Server SSE + HTTP polling remain active if direct stream is interrupted
-        }
-      );
-      activeFirestoreUnsubs.push(unsubCloud);
-    } catch {
-      // Ignore if Firestore client stream fails
-    }
     void pullUnifiedStateFromServer();
   };
 
@@ -629,6 +668,46 @@ export async function persistAuthoritativeInventoryTransactionToFirestore(entry:
   // Inventory transactions are persisted exclusively on the server via `/api/erp/inventory/adjust` and `/api/erp/pos/checkout` (`firebase-admin` DAL).
   void entry;
   return true;
+}
+
+/**
+ * Authoritatively saves a Branch/Shop to the central database (`/api/erp/branches`).
+ * Central database = truth. If the central database fails, this rejects with an error message
+ * so local persistence NEVER pretends the entity was saved.
+ */
+export async function saveBranchToCentralDatabase(branchData: Record<string, unknown>): Promise<{
+  success: boolean;
+  branch?: Record<string, unknown>;
+  error?: string;
+}> {
+  try {
+    const res = await fetch('/api/erp/branches', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-vaairo-terminal-sync': '1',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify(branchData)
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      return {
+        success: false,
+        error: data?.error || 'Unable to save. Check your connection and try again.'
+      };
+    }
+    const data = await res.json();
+    return {
+      success: true,
+      branch: (data?.branch as Record<string, unknown>) || branchData
+    };
+  } catch {
+    return {
+      success: false,
+      error: 'Unable to save. Check your connection and try again.'
+    };
+  }
 }
 
 /**

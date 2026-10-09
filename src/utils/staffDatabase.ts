@@ -23,8 +23,7 @@ import {
   HeldCart,
   PayrollRecord,
   SaleOrder,
-  SalesRepOffDutyRequest,
-  StaffEmploymentStatus
+  SalesRepOffDutyRequest
 } from '../types';
 import {
   generateCryptographicSalt,
@@ -86,71 +85,18 @@ export interface StaffDirectoryRecord {
   preferredPricesJson?: string;
   staffDataJson?: string;
   active: boolean;
-  employmentStatus?: StaffEmploymentStatus;
-  suspendedAt?: string;
-  suspensionReason?: string;
-  terminatedAt?: string;
-  terminationReason?: string;
   lastLoginAt?: string;
   loginCount?: number;
   updatedAt: string;
 }
 
-const INDEPENDENT_STAFF_LOCAL_KEY = 'vaairo_independent_staff_db_v2_records';
-const INDEPENDENT_STAFF_DATA_KEY = 'vaairo_independent_staff_db_v2_snapshots';
-const DELETED_STAFF_IDS_KEY = 'vaairo_deleted_staff_ids_v2';
-const IDB_NAME = 'VaairoIndependentStaffDB_v2';
+const INDEPENDENT_STAFF_LOCAL_KEY = 'vaairo_independent_staff_db_v1_records';
+const INDEPENDENT_STAFF_DATA_KEY = 'vaairo_independent_staff_db_v1_snapshots';
+const IDB_NAME = 'VaairoIndependentStaffDB';
 const IDB_VERSION = 1;
 const IDB_STORE_RECORDS = 'staff_directory';
 const IDB_STORE_DATA = 'staff_workspace_data';
 const FIRESTORE_COLLECTION = 'staffDirectory';
-
-// Purge legacy v1 local storage & IndexedDB staff caches so wiped staff never resurrect
-if (typeof window !== 'undefined') {
-  try {
-    localStorage.removeItem('vaairo_independent_staff_db_v1_records');
-    localStorage.removeItem('vaairo_independent_staff_db_v1_snapshots');
-    localStorage.removeItem('vaairo_deleted_staff_ids_v1');
-    if ('indexedDB' in window) {
-      window.indexedDB.deleteDatabase('VaairoIndependentStaffDB');
-    }
-  } catch {
-    // ignore cleanup warnings
-  }
-}
-
-export function getDeletedStaffIdsSet(): Set<string> {
-  try {
-    const raw = localStorage.getItem(DELETED_STAFF_IDS_KEY);
-    if (!raw) return new Set();
-    const parsed = JSON.parse(raw);
-    return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
-  } catch {
-    return new Set();
-  }
-}
-
-export function markStaffIdDeletedLocally(staffId: string): void {
-  try {
-    const set = getDeletedStaffIdsSet();
-    set.add(staffId);
-    localStorage.setItem(DELETED_STAFF_IDS_KEY, JSON.stringify(Array.from(set)));
-  } catch {
-    // ignore storage warning
-  }
-}
-
-export function unmarkStaffIdDeletedLocally(staffId: string): void {
-  try {
-    const set = getDeletedStaffIdsSet();
-    if (set.has(staffId)) {
-      set.delete(staffId);
-      localStorage.setItem(DELETED_STAFF_IDS_KEY, JSON.stringify(Array.from(set)));
-    }
-  } catch {
-    // ignore storage warning
-  }
-}
 
 function sanitizeSixDigitPin(pin?: string): string {
   const digits = (pin || '').replace(/\D/g, '').slice(0, 6);
@@ -176,9 +122,7 @@ export function loadLocalIndependentStaffRecords(): StaffDirectoryRecord[] {
     const raw = localStorage.getItem(INDEPENDENT_STAFF_LOCAL_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    const deletedSet = getDeletedStaffIdsSet();
-    return parsed.filter((r: StaffDirectoryRecord) => r && r.id && !deletedSet.has(r.id));
+    return Array.isArray(parsed) ? parsed : [];
   } catch (e) {
     console.warn('Independent Staff DB local read warning:', e);
     return [];
@@ -191,13 +135,9 @@ export function saveLocalIndependentStaffRecords(records: StaffDirectoryRecord[]
     // plaintext PINs, salaries, banking, and tax IDs are stripped from browser storage.
     const sanitized = records.map(rec => {
       const salt = rec.pinSalt || generateCryptographicSalt(16);
-      const hasValidPlainPin =
-        typeof rec.loginPin === 'string' &&
-        /^\d{6}$/.test(rec.loginPin) &&
-        (rec.loginPin !== '000000' || !rec.pinHash);
-      const pinHash = hasValidPlainPin
-        ? computeSaltedPinHashSync(sanitizeSixDigitPin(rec.loginPin), salt)
-        : rec.pinHash || '';
+      const pinHash =
+        rec.pinHash ||
+        (rec.loginPin ? computeSaltedPinHashSync(sanitizeSixDigitPin(rec.loginPin), salt) : '');
       const copy: StaffDirectoryRecord = {
         ...rec,
         pinSalt: salt,
@@ -350,34 +290,6 @@ export async function deleteRecordFromStaffIndexedDb(staffId: string): Promise<v
   });
 }
 
-export async function clearAllLocalIndependentStaffData(): Promise<void> {
-  lastPushedStaffSignatureById.clear();
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.removeItem(INDEPENDENT_STAFF_LOCAL_KEY);
-      localStorage.removeItem(INDEPENDENT_STAFF_DATA_KEY);
-      localStorage.removeItem(DELETED_STAFF_IDS_KEY);
-      localStorage.removeItem('vaairo_independent_staff_db_v1_records');
-      localStorage.removeItem('vaairo_independent_staff_db_v1_snapshots');
-    } catch {
-      // ignore
-    }
-  }
-  const idb = await openStaffIndexedDb();
-  if (!idb) return;
-  return new Promise(resolve => {
-    try {
-      const tx = idb.transaction([IDB_STORE_RECORDS, IDB_STORE_DATA], 'readwrite');
-      tx.objectStore(IDB_STORE_RECORDS).clear();
-      tx.objectStore(IDB_STORE_DATA).clear();
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => resolve();
-    } catch {
-      resolve();
-    }
-  });
-}
-
 // ============================================================================
 // TIER 3: Firebase Firestore Real-Time Cloud Staff Directory
 // ============================================================================
@@ -389,10 +301,8 @@ function computeStaffSignature(record: StaffDirectoryRecord): string {
     record.recordType,
     record.name,
     record.codeOrNumber,
-    record.roleTitle,
     record.department,
     record.branchId,
-    record.phone,
     record.loginPin,
     record.commissionRatePercent,
     record.totalSalesKes,
@@ -401,19 +311,19 @@ function computeStaffSignature(record: StaffDirectoryRecord): string {
     record.basicSalaryKes,
     record.preferredPricesJson || '',
     record.assignedCashierId || '',
-    record.employmentStatus || (record.active ? 'ACTIVE' : 'SUSPENDED'),
     record.active ? '1' : '0'
   ].join('|');
 }
 
-export async function pushStaffRecordToFirestore(
-  record: StaffDirectoryRecord,
-  force = false
-): Promise<boolean> {
+export async function pushStaffRecordToFirestore(record: StaffDirectoryRecord): Promise<boolean> {
   try {
     const safeId = (record.id || `staff-${Date.now()}`).trim().slice(0, 120);
     const sig = computeStaffSignature(record);
-    if (!force && lastPushedStaffSignatureById.get(safeId) === sig) {
+    if (lastPushedStaffSignatureById.get(safeId) === sig) {
+      return true;
+    }
+
+    if (isFirestoreWriteQuotaExhausted()) {
       return true;
     }
 
@@ -486,7 +396,7 @@ export async function pushStaffRecordToFirestore(
     delete (cleanDoc as Record<string, unknown>).houseAllowanceKes;
     delete (cleanDoc as Record<string, unknown>).transportAllowanceKes;
 
-    // Route staff directory mutation through VAAIRO Server API -> Central Cloud Firestore DAL + SSE cross-device broadcast
+    // Route staff directory mutation through VAAIRO Server API -> firebase-admin DAL + SSE cross-device broadcast
     const res = await fetch('/api/erp/staff-directory/upsert', {
       method: 'POST',
       headers: {
@@ -501,19 +411,18 @@ export async function pushStaffRecordToFirestore(
       })
     });
     if (res.ok) {
-      const body = await res.json().catch(() => ({ persisted: true }));
-      if (body && body.persisted === false) {
-        return false;
-      }
       lastPushedStaffSignatureById.set(safeId, sig);
+    }
+    return res.ok;
+  } catch (error) {
+    if (isResourceExhaustedError(error)) {
+      markFirestoreWriteQuotaExhausted();
       return true;
     }
-    return false;
-  } catch (error) {
     try {
       handleFirestoreError(error, OperationType.WRITE, `${FIRESTORE_COLLECTION}/${record.id}`);
     } catch {
-      // Ignore logging error
+      // Saved in LocalStorage & IndexedDB
     }
     return false;
   }
@@ -521,7 +430,9 @@ export async function pushStaffRecordToFirestore(
 
 export async function removeStaffRecordFromFirestore(staffId: string): Promise<boolean> {
   lastPushedStaffSignatureById.delete(staffId);
-  markStaffIdDeletedLocally(staffId);
+  if (isFirestoreWriteQuotaExhausted()) {
+    return true;
+  }
   try {
     const res = await fetch('/api/erp/staff-directory/delete', {
       method: 'POST',
@@ -532,10 +443,12 @@ export async function removeStaffRecordFromFirestore(staffId: string): Promise<b
       },
       body: JSON.stringify({ staffId })
     });
-    if (!res.ok) return false;
-    const body = await res.json().catch(() => ({ persisted: true }));
-    return body?.persisted !== false;
+    return res.ok;
   } catch (error) {
+    if (isResourceExhaustedError(error)) {
+      markFirestoreWriteQuotaExhausted();
+      return true;
+    }
     try {
       handleFirestoreError(error, OperationType.DELETE, `${FIRESTORE_COLLECTION}/${staffId}`);
     } catch {
@@ -634,24 +547,12 @@ export function subscribeToIndependentStaffDatabase(
     return cleanDoc;
   };
 
-  // Push any local or IndexedDB staff records to the unified central server/Firestore store on boot and pull all cross-device records
+  // Push any local staff records to the unified server store on boot and pull all cross-device records
   const syncWithServerStore = async () => {
     if (isDisposed) return;
     try {
       const localRecords = loadLocalIndependentStaffRecords();
-      const idbData = await readAllFromStaffIndexedDb().catch(() => ({ records: [] as StaffDirectoryRecord[] }));
-      const deletedSet = getDeletedStaffIdsSet();
-      const combinedById = new Map<string, StaffDirectoryRecord>();
-      for (const r of idbData.records) {
-        if (r && r.id && r.name && !deletedSet.has(r.id)) combinedById.set(r.id, r);
-      }
-      for (const r of localRecords) {
-        if (r && r.id && r.name && !deletedSet.has(r.id)) {
-          const existing = combinedById.get(r.id);
-          combinedById.set(r.id, { ...existing, ...r, pinHash: r.pinHash || existing?.pinHash, pinSalt: r.pinSalt || existing?.pinSalt });
-        }
-      }
-      const batchPayload = Array.from(combinedById.values()).map(sanitizeRecordForSync);
+      const batchPayload = localRecords.map(sanitizeRecordForSync);
       const res = await fetch('/api/erp/staff-directory/sync-batch', {
         method: 'POST',
         headers: {
@@ -697,9 +598,6 @@ export function subscribeToIndependentStaffDatabase(
               }
             });
             onUpdate(serverRecords);
-          } else if (data?.wiped) {
-            void clearAllLocalIndependentStaffData();
-            onUpdate([]);
           }
         }
       }
@@ -731,12 +629,6 @@ export function subscribeToIndependentStaffDatabase(
       });
       eventSource.addEventListener('STAFF_DIRECTORY_DELETED', () => {
         if (!isDisposed) void pollServerStaffDirectory();
-      });
-      eventSource.addEventListener('STAFF_AND_BRANCHES_WIPED', () => {
-        if (!isDisposed) {
-          void clearAllLocalIndependentStaffData();
-          onUpdate([]);
-        }
       });
     } catch {
       eventSource = null;
@@ -888,16 +780,7 @@ export function employeeToStaffDirectoryRecord(
     bankName: emp.bankName || 'Equity Bank Kenya',
     bankAccount: emp.bankAccount || '018000000000',
     staffDataJson: serializeStaffPersonalData(personalData),
-    active:
-      emp.employmentStatus === 'SUSPENDED' || emp.employmentStatus === 'TERMINATED'
-        ? false
-        : emp.active ?? true,
-    employmentStatus:
-      emp.employmentStatus || (emp.active === false ? 'SUSPENDED' : 'ACTIVE'),
-    suspendedAt: emp.suspendedAt,
-    suspensionReason: emp.suspensionReason,
-    terminatedAt: emp.terminatedAt,
-    terminationReason: emp.terminationReason,
+    active: emp.active ?? true,
     lastLoginAt: existingMeta?.lastLoginAt,
     loginCount: existingMeta?.loginCount ?? 0,
     updatedAt: new Date().toISOString()
@@ -965,16 +848,7 @@ export function affiliateToStaffDirectoryRecord(
     customSlug: aff.customSlug || aff.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
     preferredPricesJson,
     staffDataJson: serializeStaffPersonalData(personalData),
-    active:
-      aff.employmentStatus === 'SUSPENDED' || aff.employmentStatus === 'TERMINATED'
-        ? false
-        : aff.active ?? true,
-    employmentStatus:
-      aff.employmentStatus || (aff.active === false ? 'SUSPENDED' : 'ACTIVE'),
-    suspendedAt: aff.suspendedAt,
-    suspensionReason: aff.suspensionReason,
-    terminatedAt: aff.terminatedAt,
-    terminationReason: aff.terminationReason,
+    active: aff.active ?? true,
     lastLoginAt: existingMeta?.lastLoginAt,
     loginCount: existingMeta?.loginCount ?? 0,
     updatedAt: new Date().toISOString()
@@ -982,8 +856,6 @@ export function affiliateToStaffDirectoryRecord(
 }
 
 export function staffDirectoryRecordToEmployee(rec: StaffDirectoryRecord): Employee {
-  const status: StaffEmploymentStatus =
-    rec.employmentStatus || (rec.active === false ? 'SUSPENDED' : 'ACTIVE');
   return {
     id: rec.id,
     employeeNumber: rec.codeOrNumber,
@@ -1010,12 +882,7 @@ export function staffDirectoryRecordToEmployee(rec: StaffDirectoryRecord): Emplo
     bankName: rec.bankName || 'Equity Bank Kenya',
     bankAccount: rec.bankAccount || '',
     mPesaNumber: rec.phone || '',
-    active: status === 'ACTIVE' && (rec.active ?? true),
-    employmentStatus: status,
-    suspendedAt: rec.suspendedAt,
-    suspensionReason: rec.suspensionReason,
-    terminatedAt: rec.terminatedAt,
-    terminationReason: rec.terminationReason
+    active: rec.active ?? true
   };
 }
 
@@ -1028,9 +895,6 @@ export function staffDirectoryRecordToAffiliate(rec: StaffDirectoryRecord): Affi
       preferredPrices = {};
     }
   }
-
-  const status: StaffEmploymentStatus =
-    rec.employmentStatus || (rec.active === false ? 'SUSPENDED' : 'ACTIVE');
 
   return {
     id: rec.id,
@@ -1058,12 +922,7 @@ export function staffDirectoryRecordToAffiliate(rec: StaffDirectoryRecord): Affi
     paidCommissionKes: rec.paidCommissionKes ?? 0,
     pendingCommissionKes: rec.pendingCommissionKes ?? 0,
     mpesaNumber: rec.phone || '',
-    active: status === 'ACTIVE' && (rec.active ?? true),
-    employmentStatus: status,
-    suspendedAt: rec.suspendedAt,
-    suspensionReason: rec.suspensionReason,
-    terminatedAt: rec.terminatedAt,
-    terminationReason: rec.terminationReason
+    active: rec.active ?? true
   };
 }
 
@@ -1072,17 +931,8 @@ export function staffDirectoryRecordToAffiliate(rec: StaffDirectoryRecord): Affi
 // ============================================================================
 export async function upsertStaffRecordAcrossAllTiers(
   record: StaffDirectoryRecord,
-  personalData?: StaffPersonalDataPayload,
-  force = false
-): Promise<boolean> {
-  unmarkStaffIdDeletedLocally(record.id);
-  // Central database = source of truth. Write to central Firestore first.
-  const ok = await pushStaffRecordToFirestore(record, force);
-  if (!ok) {
-    return false;
-  }
-
-  // Only update local browser cache after central database confirms success
+  personalData?: StaffPersonalDataPayload
+): Promise<void> {
   const existing = loadLocalIndependentStaffRecords();
   const next = existing.some(r => r.id === record.id)
     ? existing.map(r => (r.id === record.id ? record : r))
@@ -1096,7 +946,7 @@ export async function upsertStaffRecordAcrossAllTiers(
   }
 
   await writeRecordToStaffIndexedDb(record, personalData);
-  return true;
+  await pushStaffRecordToFirestore(record);
 }
 
 export function findStaffByPinInstant(
@@ -1126,15 +976,15 @@ export function findStaffByPinInstant(
     if (exactStaff) return exactStaff;
   }
 
-  // 2. Department + PIN match ONLY (never jump across departments when preferredDept is specified)
+  // 2. Department + PIN match
   if (preferredDept) {
     const deptMatch = activeRecords.find(
       r => r.department === preferredDept && matchesRecordPin(r)
     );
-    return deptMatch || null;
+    if (deptMatch) return deptMatch;
   }
 
-  // 3. Universal PIN match ONLY when no preferredDept constraint was provided
+  // 3. Universal PIN match across entire Independent Staff Database
   const universalMatch = activeRecords.find(r => matchesRecordPin(r));
   return universalMatch || null;
 }

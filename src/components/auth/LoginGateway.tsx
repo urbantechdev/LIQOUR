@@ -29,7 +29,8 @@ import {
   AlertCircle,
   KeyRound,
   Copy,
-  Check
+  Check,
+  ExternalLink
 } from 'lucide-react';
 import { formatKes } from '../../utils/kenyaTax';
 import { setStoredSessionToken } from '../../utils/apiAuth';
@@ -182,6 +183,17 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
   const [totpError, setTotpError] = useState<string | null>(null);
   const [totpSecondsRemaining, setTotpSecondsRemaining] = useState<number>(30);
   const [copiedSecret, setCopiedSecret] = useState<boolean>(false);
+  const [isUnauthorizedDomain, setIsUnauthorizedDomain] = useState<boolean>(false);
+  const [copiedDomain, setCopiedDomain] = useState<boolean>(false);
+
+  const handleCopyDomain = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    const domain = window.location.hostname;
+    navigator.clipboard?.writeText(domain).then(() => {
+      setCopiedDomain(true);
+      setTimeout(() => setCopiedDomain(false), 2500);
+    }).catch(() => {});
+  }, []);
   const [verifiedGoogleUser, setVerifiedGoogleUser] = useState<{
     name: string;
     email: string;
@@ -330,6 +342,7 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
   const handleOpenGoogleLogin = (role: 'SUPER_ADMIN' | 'ACCOUNTANT') => {
     setGoogleTargetRole(role);
     setGoogleLoginError(null);
+    setIsUnauthorizedDomain(false);
     setViewMode('GOOGLE_LOGIN');
   };
 
@@ -533,8 +546,14 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
         friendlyMsg = 'Your browser blocked the Google Sign-In popup. Please allow popups for this site and click Sign in with Google again.';
       } else if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
         friendlyMsg = 'The Google Sign-In popup was closed before completing authentication. Please click Sign in with Google and select your account.';
-      } else if (code === 'auth/unauthorized-domain') {
+      } else if (
+        code === 'auth/unauthorized-domain' ||
+        rawMsg.includes('unauthorized-domain') ||
+        rawMsg.includes('Authorized domains') ||
+        rawMsg.includes('authorized domain')
+      ) {
         friendlyMsg = `Domain "${window.location.hostname}" must be listed under Firebase Console → Authentication → Settings → Authorized domains.`;
+        setIsUnauthorizedDomain(true);
       }
       setGoogleLoginError(friendlyMsg);
     }
@@ -1161,10 +1180,99 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
               </p>
             </div>
 
-            {googleLoginError && (
+            {googleLoginError && !isUnauthorizedDomain && (
               <div className="p-3.5 rounded-xl bg-red-50 border border-red-300 text-red-900 text-xs font-semibold flex items-start gap-2 animate-in fade-in">
                 <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
                 <div className="flex-1 leading-snug">{googleLoginError}</div>
+              </div>
+            )}
+
+            {isUnauthorizedDomain && (
+              <div className="p-4 rounded-2xl bg-amber-50/90 border-2 border-amber-400 text-slate-900 text-xs space-y-3.5 animate-in fade-in shadow-md">
+                <div className="flex items-start gap-2.5">
+                  <div className="w-7 h-7 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <ShieldAlert className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="font-montserrat font-black text-amber-950 text-sm">
+                      Firebase Authorized Domain Required
+                    </h4>
+                    <p className="text-[11px] text-amber-900 mt-0.5 leading-relaxed">
+                      Google OAuth popups require this domain to be whitelisted in your Firebase project console.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Current Domain Badge with Copy */}
+                <div className="bg-slate-900 text-white rounded-xl p-3 border border-slate-700 space-y-1.5">
+                  <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 uppercase tracking-wider">
+                    <span>Domain to Authorize:</span>
+                    {copiedDomain ? (
+                      <span className="text-emerald-400 font-bold flex items-center gap-1">
+                        <Check className="w-3 h-3" /> Copied!
+                      </span>
+                    ) : (
+                      <span>Click to copy</span>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <code className="text-xs font-mono text-amber-300 font-bold break-all select-all">
+                      {typeof window !== 'undefined' ? window.location.hostname : 'ais-dev-fw67cxsd76zbrxp46vciwx-668230074633.europe-west2.run.app'}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={handleCopyDomain}
+                      className="px-2.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-slate-900 rounded-lg font-montserrat font-bold text-[11px] flex items-center gap-1 shrink-0 transition cursor-pointer"
+                    >
+                      {copiedDomain ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedDomain ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Step-by-Step Instructions */}
+                <div className="bg-white/90 rounded-xl p-3 border border-amber-200 space-y-1.5 text-[11px] text-amber-950">
+                  <div className="font-montserrat font-black text-xs text-amber-900 flex items-center gap-1">
+                    <span>Steps to Enable Google Sign-In:</span>
+                  </div>
+                  <ol className="list-decimal list-inside space-y-1 pl-1 text-slate-700">
+                    <li>
+                      Open <strong>Firebase Console</strong> → <strong>Authentication</strong> → <strong>Settings</strong> tab
+                    </li>
+                    <li>
+                      Scroll down to <strong>Authorized domains</strong> and click <strong>Add domain</strong>
+                    </li>
+                    <li>
+                      Paste <code className="px-1 py-0.5 bg-slate-100 rounded text-slate-900 font-mono font-bold">{typeof window !== 'undefined' ? window.location.hostname : 'ais-dev-fw67cxsd76zbrxp46vciwx-668230074633.europe-west2.run.app'}</code> and save
+                    </li>
+                    <li className="text-slate-500">
+                      (Also add <code className="px-1 py-0.5 bg-slate-100 rounded text-slate-700 font-mono text-[10px]">ais-pre-fw67cxsd76zbrxp46vciwx-668230074633.europe-west2.run.app</code> for shared previews)
+                    </li>
+                  </ol>
+                </div>
+
+                {/* Direct Console Link & Alternative Option */}
+                <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                  <a
+                    href="https://console.firebase.google.com/project/gen-lang-client-0284516968/authentication/settings"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 py-2.5 px-3 bg-[#0A006E] hover:bg-[#060046] text-[#FFDE00] rounded-xl font-montserrat font-bold text-center text-xs flex items-center justify-center gap-1.5 transition shadow-xs"
+                  >
+                    <span>Open Firebase Console Settings</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsStaffDropdownOpen(true);
+                      setViewMode('ROLE_BOXES');
+                    }}
+                    className="py-2.5 px-3 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded-xl font-montserrat font-bold text-xs transition cursor-pointer"
+                  >
+                    Sign in with Staff PIN Instead
+                  </button>
+                </div>
               </div>
             )}
 
