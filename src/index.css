@@ -1,0 +1,284 @@
+@import "tailwindcss";
+@custom-variant hover (&:hover);
+
+@theme {
+  --font-montserrat: 'Montserrat', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-raleway: 'Raleway', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  
+  --color-navy: #0A006E;
+  --color-navy-dark: #060046;
+  --color-navy-light: #160bb0;
+  
+  --color-forest: #34D186;
+  --color-forest-dark: #28B873;
+  --color-forest-light: #5AE09F;
+  --color-bolt: #34D186;
+  --color-bolt-dark: #28B873;
+  --color-bolt-text: #1E9E60;
+
+  /* Bolt Ride Green System Palette */
+  --color-emerald-50: #EBFCF4;
+  --color-emerald-100: #D1F7E5;
+  --color-emerald-200: #A6EFCD;
+  --color-emerald-300: #6EE2AE;
+  --color-emerald-400: #34D186;
+  --color-emerald-500: #34D186;
+  --color-emerald-600: #28B873;
+  --color-emerald-700: #1E9E60;
+  --color-emerald-800: #167D4B;
+  --color-emerald-900: #11643C;
+  --color-emerald-950: #24B36B;
+  
+  --color-gold: #FFDE00;
+  --color-gold-hover: #e5c700;
+  --color-gold-light: #fff8cc;
+  
+  --color-canvas: #F0F2F0;
+}
+
+:root {
+  --font-heading: 'Montserrat', sans-serif;
+  --font-body: 'Raleway', sans-serif;
+}
+
+body {
+  font-family: 'Raleway', sans-serif;
+  background-color: #F0F2F0;
+  color: #0f172a;
+}
+
+.font-montserrat {
+  font-family: 'Montserrat', sans-serif;
+}
+
+.font-title {
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: -0.02em;
+}
+
+.font-subtitle {
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 600 !important;
+  font-style: normal;
+}
+
+.font-raleway {
+  font-family: 'Raleway', sans-serif;
+}
+
+/* Custom scrollbars for high density ERP data */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #e2e8f0;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.85; }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Tactile Hover Animation for Buttons */
+button:not(:disabled) {
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.18s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+button:not(:disabled):hover {
+  transform: translateY(-1.5px) scale(1.015);
+}
+
+button:not(:disabled):active {
+  transform: translateY(0.5px) scale(0.985);
+}
+
+/* Moving Silent Scanner Animations & Rear Shadows for Header, Blocks & Boxes */
+@keyframes silentBeamTraverse {
+  0% {
+    transform: translateX(-140%) skewX(-24deg);
+  }
+  55%, 100% {
+    transform: translateX(340%) skewX(-24deg);
+  }
+}
+
+@keyframes silentSurfaceScanner {
+  0% {
+    background-position: 180% 0;
+  }
+  100% {
+    background-position: -80% 0;
+  }
+}
+
+.silent-scanner-beam {
+  position: absolute;
+  top: -20%;
+  bottom: -20%;
+  left: 0;
+  width: 38%;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.06) 35%,
+    rgba(255, 222, 0, 0.22) 50%,
+    rgba(255, 255, 255, 0.14) 65%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: silentBeamTraverse 5.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  z-index: 5;
+}
+
+.silent-scanner-beam-fast {
+  position: absolute;
+  top: -20%;
+  bottom: -20%;
+  left: 0;
+  width: 55%;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.65) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: silentBeamTraverse 4.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  z-index: 5;
+}
+
+.silent-scanner-beam-dark {
+  position: absolute;
+  top: -20%;
+  bottom: -20%;
+  left: 0;
+  width: 42%;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.45) 45%,
+    rgba(10, 0, 110, 0.12) 55%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: silentBeamTraverse 5.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  z-index: 5;
+}
+
+div.bg-white.rounded-3xl,
+div.bg-white.rounded-2xl,
+div.bg-white.rounded-xl,
+.hover-card-lift {
+  background-image: linear-gradient(
+    115deg,
+    rgba(255, 255, 255, 0) 38%,
+    rgba(10, 0, 110, 0.035) 47%,
+    rgba(255, 222, 0, 0.14) 50%,
+    rgba(10, 0, 110, 0.035) 53%,
+    rgba(255, 255, 255, 0) 62%
+  );
+  background-size: 260% 100%;
+  animation: silentSurfaceScanner 6.5s linear infinite;
+  box-shadow: 0 10px 26px -4px rgba(10, 0, 110, 0.14), 0 4px 10px -2px rgba(15, 23, 42, 0.08);
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
+}
+
+/* Yellow Dashboard Hero Banners with Moving Silent Scanner Sweep */
+div.bg-\[\#FFDE00\].hover-card-lift {
+  background-color: #FFDE00;
+  background-image: linear-gradient(
+    115deg,
+    rgba(255, 255, 255, 0) 36%,
+    rgba(255, 255, 255, 0.48) 48%,
+    rgba(10, 0, 110, 0.08) 51%,
+    rgba(255, 255, 255, 0.35) 54%,
+    rgba(255, 255, 255, 0) 64%
+  );
+  background-size: 260% 100%;
+  animation: silentSurfaceScanner 5.5s linear infinite;
+  box-shadow: 0 12px 28px -4px rgba(10, 0, 110, 0.18), 0 4px 10px -2px rgba(15, 23, 42, 0.08);
+}
+
+div.bg-slate-50.rounded-2xl,
+div.bg-slate-50.rounded-xl {
+  background-image: linear-gradient(
+    115deg,
+    rgba(255, 255, 255, 0) 38%,
+    rgba(255, 255, 255, 0.75) 48%,
+    rgba(255, 222, 0, 0.12) 51%,
+    rgba(255, 255, 255, 0) 62%
+  );
+  background-size: 260% 100%;
+  animation: silentSurfaceScanner 7s linear infinite;
+  box-shadow: 0 6px 16px -3px rgba(10, 0, 110, 0.09), 0 2px 6px -1px rgba(15, 23, 42, 0.06);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+div.bg-white.rounded-3xl:not(.fixed *):hover,
+div.bg-white.rounded-2xl:not(.fixed *):hover,
+div.bg-white.rounded-xl:not(.fixed *):hover,
+.hover-card-lift:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 18px 36px -6px rgba(10, 0, 110, 0.22), 0 8px 16px -4px rgba(15, 23, 42, 0.12);
+}
+
+div.bg-slate-50.rounded-2xl:not(.fixed *):hover,
+div.bg-slate-50.rounded-xl:not(.fixed *):hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px -4px rgba(10, 0, 110, 0.14), 0 4px 10px -2px rgba(15, 23, 42, 0.08);
+}
+
+/* Bolt Ride Green (#34D186) High-Contrast Button & Badge Typography */
+.bg-\[\#34D186\].text-\[\#FFDE00\],
+.bg-forest.text-\[\#FFDE00\],
+.bg-\[\#34D186\] .text-\[\#FFDE00\],
+.bg-forest .text-\[\#FFDE00\] {
+  color: #ffffff !important;
+  text-shadow: 0 1px 2px rgba(17, 100, 60, 0.28);
+}
+
+/* Mobile Full-Screen Popups & Modals (< 640px) */
+@media (max-width: 639px) {
+  div.fixed.inset-0.z-50,
+  div.fixed.inset-0.z-\[60\],
+  div.fixed.inset-0.z-\[100\],
+  div.fixed.inset-0.z-\[9998\],
+  div.fixed.inset-0.z-\[9999\],
+  div.fixed.inset-0.z-\[10000\] {
+    padding: 0 !important;
+  }
+
+  div.fixed.inset-0.z-50 > div.bg-white,
+  div.fixed.inset-0.z-50 > div.bg-slate-900,
+  div.fixed.inset-0.z-\[60\] > div.bg-white,
+  div.fixed.inset-0.z-\[100\] > div.bg-slate-900\/95,
+  div.fixed.inset-0.z-\[9999\] > div.bg-white,
+  div.fixed.inset-0.z-\[9999\] > div.bg-slate-900,
+  div.fixed.inset-0.z-\[10000\] > div.bg-white,
+  div.fixed.inset-0.z-\[10000\] > div.bg-slate-900\/95 {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+    max-height: 100dvh !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+  }
+}
+
+
+

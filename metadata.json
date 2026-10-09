@@ -1,0 +1,6 @@
+{
+  "name": "Vaairo ERP & Alcohol Distribution",
+  "description": "Enterprise Kenyan Alcohol ERP with 16% VAT enforcement, Daraja M-Pesa automated reconciliation, IPS/LPS inventory, and multi-tier distribution hierarchy.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

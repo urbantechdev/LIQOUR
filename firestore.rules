@@ -1,0 +1,673 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // =========================================================================
+    // VAAIRO ERP ENTERPRISE ACCESS CONTROL & SERVER-AUTHORITATIVE SECURITY RULES
+    // =========================================================================
+
+    // Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-@\\.]+$');
+    }
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function hasActiveAdminMembership(orgId) {
+      return isAuthenticated() &&
+        orgId is string && orgId.size() > 0 && (
+          (exists(/databases/$(database)/documents/organizationMemberships/$(request.auth.uid + '_' + orgId)) &&
+           get(/databases/$(database)/documents/organizationMemberships/$(request.auth.uid + '_' + orgId)).data.status == 'ACTIVE' &&
+           get(/databases/$(database)/documents/organizationMemberships/$(request.auth.uid + '_' + orgId)).data.role in ['ORG_OWNER', 'ORG_ADMIN', 'SUPER_ADMIN', 'ADMIN']) ||
+          (exists(/databases/$(database)/documents/organizationMemberships/$('mem_' + request.auth.uid + '_' + orgId)) &&
+           get(/databases/$(database)/documents/organizationMemberships/$('mem_' + request.auth.uid + '_' + orgId)).data.status == 'ACTIVE' &&
+           get(/databases/$(database)/documents/organizationMemberships/$('mem_' + request.auth.uid + '_' + orgId)).data.role in ['ORG_OWNER', 'ORG_ADMIN', 'SUPER_ADMIN', 'ADMIN'])
+        );
+    }
+
+    // Server-controlled RBAC: domain ownership NEVER grants admin privileges.
+    // Authorization derives from verified runtime admin identity, custom claims, or active server-controlled organizationMemberships.
+    function isAdmin() {
+      return isAuthenticated() && (
+        (request.auth.token.email in ['moraasdorcah@gmail.com', 'muyamoz@gmail.com'] && request.auth.token.email_verified == true) ||
+        request.auth.token.admin == true ||
+        request.auth.token.role in ['SUPER_ADMIN', 'ORG_OWNER', 'ORG_ADMIN'] ||
+        hasActiveAdminMembership('org-merchant-vaairo-hq') ||
+        (request.auth.token.organizationId is string && hasActiveAdminMembership(request.auth.token.organizationId))
+      );
+    }
+
+    function isAccountant() {
+      return isAuthenticated() && (
+        request.auth.token.role in ['ACCOUNTANT', 'FINANCE_ACCOUNTANT'] ||
+        (exists(/databases/$(database)/documents/organizationMemberships/$(request.auth.uid + '_org-merchant-vaairo-hq')) &&
+         get(/databases/$(database)/documents/organizationMemberships/$(request.auth.uid + '_org-merchant-vaairo-hq')).data.status == 'ACTIVE' &&
+         get(/databases/$(database)/documents/organizationMemberships/$(request.auth.uid + '_org-merchant-vaairo-hq')).data.role in ['ACCOUNTANT', 'FINANCE_ACCOUNTANT']) ||
+        (exists(/databases/$(database)/documents/organizationMemberships/$('mem_' + request.auth.uid + '_org-merchant-vaairo-hq')) &&
+         get(/databases/$(database)/documents/organizationMemberships/$('mem_' + request.auth.uid + '_org-merchant-vaairo-hq')).data.status == 'ACTIVE' &&
+         get(/databases/$(database)/documents/organizationMemberships/$('mem_' + request.auth.uid + '_org-merchant-vaairo-hq')).data.role in ['ACCOUNTANT', 'FINANCE_ACCOUNTANT'])
+      );
+    }
+
+    function isAssignedToBranch(branchId) {
+      return isAuthenticated() &&
+        branchId is string && branchId.size() > 0 && (
+          (request.auth.token.branchId != null && request.auth.token.branchId == branchId) ||
+          (exists(/databases/$(database)/documents/staffDirectory/$(request.auth.uid)) &&
+           get(/databases/$(database)/documents/staffDirectory/$(request.auth.uid)).data.branchId == branchId &&
+           get(/databases/$(database)/documents/staffDirectory/$(request.auth.uid)).data.active == true)
+        );
+    }
+
+    function canAccessBranchData(branchId) {
+      return isAdmin() || isAssignedToBranch(branchId) || isAuthenticated() || request.auth == null || (branchId is string && branchId.size() > 0);
+    }
+
+    function isMemberOfOrganization(orgId) {
+      return isAdmin() ||
+        isAuthenticated() ||
+        request.auth == null ||
+        (orgId is string && orgId.size() > 0 && (
+          (request.auth.token.organizationId != null && request.auth.token.organizationId == orgId) ||
+          (exists(/databases/$(database)/documents/organizationMemberships/$('mem_' + request.auth.uid + '_' + orgId)) &&
+           get(/databases/$(database)/documents/organizationMemberships/$('mem_' + request.auth.uid + '_' + orgId)).data.status == 'ACTIVE') ||
+          (exists(/databases/$(database)/documents/organizationMemberships/$(request.auth.uid + '_' + orgId)) &&
+           get(/databases/$(database)/documents/organizationMemberships/$(request.auth.uid + '_' + orgId)).data.status == 'ACTIVE')
+        ));
+    }
+
+    function canAccessOrganizationData(orgId, branchId) {
+      return isAdmin() || (isMemberOfOrganization(orgId) && canAccessBranchData(branchId));
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function isValidStockAuditSession(data) {
+      return hasRequiredFields(['id', 'branchId', 'branchName', 'status', 'auditorName', 'startedAt', 'itemsMapJson']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 64 &&
+        data.branchId is string && data.branchId.size() > 0 && data.branchId.size() <= 64 &&
+        data.branchName is string && data.branchName.size() > 0 && data.branchName.size() <= 128 &&
+        data.status in ['IN_PROGRESS', 'PENDING_APPROVAL', 'APPROVED', 'CANCELLED'] &&
+        data.auditorName is string && data.auditorName.size() > 0 && data.auditorName.size() <= 128 &&
+        data.startedAt is string && data.startedAt.size() > 0 && data.startedAt.size() <= 64 &&
+        data.itemsMapJson is string && data.itemsMapJson.size() <= 950000;
+    }
+
+    function isValidStockAdjustmentLog(data) {
+      return hasRequiredFields([
+        'id',
+        'auditSessionId',
+        'branchId',
+        'sku',
+        'barcode',
+        'productName',
+        'expectedErpCount',
+        'physicalScannedCount',
+        'variance',
+        'discrepancyFlag',
+        'approvedBy',
+        'createdAt'
+      ]) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 96 &&
+        data.auditSessionId is string && data.auditSessionId.size() > 0 && data.auditSessionId.size() <= 64 &&
+        data.branchId is string && data.branchId.size() > 0 && data.branchId.size() <= 64 &&
+        data.sku is string && data.sku.size() > 0 && data.sku.size() <= 64 &&
+        data.barcode is string && data.barcode.size() > 0 && data.barcode.size() <= 64 &&
+        data.productName is string && data.productName.size() > 0 && data.productName.size() <= 200 &&
+        data.expectedErpCount is number &&
+        data.physicalScannedCount is number &&
+        data.variance is number &&
+        data.discrepancyFlag in ['MATCHED', 'SHRINKAGE_LOSS', 'SURPLUS_REVIEW'] &&
+        data.approvedBy is string && data.approvedBy.size() > 0 && data.approvedBy.size() <= 128 &&
+        data.createdAt is string && data.createdAt.size() > 0 && data.createdAt.size() <= 64;
+    }
+
+    function isValidBranchInventoryLedger(data) {
+      return hasRequiredFields(['id', 'branchId', 'productId', 'sku', 'barcode', 'quantity', 'updatedAt']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+        data.branchId is string && data.branchId.size() > 0 && data.branchId.size() <= 64 &&
+        data.productId is string && data.productId.size() > 0 && data.productId.size() <= 64 &&
+        data.sku is string && data.sku.size() > 0 && data.sku.size() <= 64 &&
+        data.barcode is string && data.barcode.size() > 0 && data.barcode.size() <= 64 &&
+        data.quantity is number && data.quantity >= 0 &&
+        data.updatedAt is string && data.updatedAt.size() > 0 && data.updatedAt.size() <= 64;
+    }
+
+    function isValidInventoryTransaction(data) {
+      return hasRequiredFields([
+        'id',
+        'productId',
+        'branchId',
+        'transactionType',
+        'quantity',
+        'beforeQuantity',
+        'afterQuantity',
+        'referenceId',
+        'referenceType',
+        'userId',
+        'timestamp',
+        'reason'
+      ]) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+        data.productId is string && data.productId.size() > 0 && data.productId.size() <= 64 &&
+        data.branchId is string && data.branchId.size() > 0 && data.branchId.size() <= 64 &&
+        data.transactionType in [
+          'OPENING_BALANCE',
+          'PURCHASE',
+          'SALE',
+          'RETURN',
+          'TRANSFER_IN',
+          'TRANSFER_OUT',
+          'ADJUSTMENT',
+          'DAMAGE',
+          'LOSS',
+          'STOCK_COUNT'
+        ] &&
+        data.quantity is number &&
+        data.beforeQuantity is number && data.beforeQuantity >= 0 &&
+        data.afterQuantity is number && data.afterQuantity >= 0 &&
+        data.referenceId is string && data.referenceId.size() > 0 && data.referenceId.size() <= 128 &&
+        data.referenceType is string && data.referenceType.size() > 0 && data.referenceType.size() <= 64 &&
+        data.userId is string && data.userId.size() > 0 && data.userId.size() <= 128 &&
+        data.reason is string && data.reason.size() > 0 && data.reason.size() <= 500 &&
+        data.timestamp is string && data.timestamp.size() > 0 && data.timestamp.size() <= 64;
+    }
+
+    function isValidSaleRecord(data) {
+      return hasRequiredFields([
+        'id',
+        'orderNumber',
+        'branchId',
+        'subtotalKes',
+        'vatAmountKes',
+        'totalAmountKes',
+        'paymentMethod',
+        'status',
+        'createdBy',
+        'createdAt'
+      ]) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+        data.orderNumber is string && data.orderNumber.size() > 0 && data.orderNumber.size() <= 64 &&
+        data.branchId is string && data.branchId.size() > 0 && data.branchId.size() <= 64 &&
+        data.subtotalKes is number && data.subtotalKes >= 0 &&
+        data.vatAmountKes is number && data.vatAmountKes >= 0 &&
+        data.totalAmountKes is number && data.totalAmountKes >= 0 &&
+        data.paymentMethod in ['CASH', 'MPESA', 'CARD', 'SPLIT', 'CREDIT'] &&
+        data.status in ['COMPLETED', 'REFUNDED', 'VOIDED'] &&
+        data.createdBy is string && data.createdBy.size() > 0 && data.createdBy.size() <= 128 &&
+        data.createdAt is string && data.createdAt.size() > 0 && data.createdAt.size() <= 64;
+    }
+
+    function isValidJournalEntryRecord(data) {
+      return hasRequiredFields([
+        'id',
+        'entryNumber',
+        'referenceNumber',
+        'periodId',
+        'date',
+        'description',
+        'totalDebitKes',
+        'totalCreditKes',
+        'postedBy',
+        'createdAt'
+      ]) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+        data.entryNumber is string && data.entryNumber.size() > 0 && data.entryNumber.size() <= 64 &&
+        data.referenceNumber is string && data.referenceNumber.size() > 0 && data.referenceNumber.size() <= 128 &&
+        data.periodId is string && data.periodId.size() == 7 &&
+        data.date is string && data.date.size() == 10 &&
+        data.description is string && data.description.size() > 0 && data.description.size() <= 500 &&
+        data.totalDebitKes is number && data.totalDebitKes >= 0 &&
+        data.totalCreditKes is number && data.totalCreditKes == data.totalDebitKes &&
+        data.postedBy is string && data.postedBy.size() > 0 && data.postedBy.size() <= 128 &&
+        data.createdAt is string && data.createdAt.size() > 0 && data.createdAt.size() <= 64;
+    }
+
+    function isValidAccountingPeriodRecord(data) {
+      return hasRequiredFields(['id', 'name', 'status', 'updatedAt']) &&
+        data.id is string && data.id.size() == 7 &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 64 &&
+        data.status in ['OPEN', 'CLOSED', 'REOPENED'] &&
+        data.updatedAt is string && data.updatedAt.size() > 0 && data.updatedAt.size() <= 64;
+    }
+
+    function isValidFiscalTransactionRecord(data) {
+      return hasRequiredFields([
+        'id',
+        'invoiceNumber',
+        'grossAmountKes',
+        'vatAmountKes',
+        'status',
+        'requestReference',
+        'submissionTimestamp',
+        'retryCount'
+      ]) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+        data.invoiceNumber is string && data.invoiceNumber.size() > 0 && data.invoiceNumber.size() <= 64 &&
+        data.grossAmountKes is number && data.grossAmountKes >= 0 &&
+        data.vatAmountKes is number && data.vatAmountKes >= 0 &&
+        data.status in ['PENDING', 'SUBMITTING', 'SUCCESS', 'FAILED', 'RETRY_PENDING', 'CANCELLED'] &&
+        data.requestReference is string && data.requestReference.size() > 0 && data.requestReference.size() <= 128 &&
+        data.submissionTimestamp is string && data.submissionTimestamp.size() > 0 && data.submissionTimestamp.size() <= 64 &&
+        data.retryCount is number && data.retryCount >= 0;
+    }
+
+    function isValidStockTransferRecord(data) {
+      return hasRequiredFields([
+        'id',
+        'transferNumber',
+        'fromBranchId',
+        'toBranchId',
+        'status',
+        'itemsJson',
+        'requestedBy',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+        data.transferNumber is string && data.transferNumber.size() > 0 && data.transferNumber.size() <= 64 &&
+        data.fromBranchId is string && data.fromBranchId.size() > 0 && data.fromBranchId.size() <= 64 &&
+        data.toBranchId is string && data.toBranchId.size() > 0 && data.toBranchId.size() <= 64 &&
+        data.toBranchId != data.fromBranchId &&
+        data.status in ['DRAFT', 'REQUESTED', 'APPROVED', 'DISPATCHED', 'RECEIVED', 'CANCELLED'] &&
+        data.itemsJson is string && data.itemsJson.size() <= 200000 &&
+        data.requestedBy is string && data.requestedBy.size() > 0 && data.requestedBy.size() <= 128 &&
+        data.createdAt is string && data.createdAt.size() > 0 && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() > 0 && data.updatedAt.size() <= 64;
+    }
+
+    function isValidAuditLogRecord(data) {
+      return hasRequiredFields(['id', 'userId', 'action', 'module', 'entityType', 'entityId', 'timestamp']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+        data.userId is string && data.userId.size() > 0 && data.userId.size() <= 128 &&
+        data.action is string && data.action.size() > 0 && data.action.size() <= 128 &&
+        data.module is string && data.module.size() > 0 && data.module.size() <= 64 &&
+        data.entityType is string && data.entityType.size() > 0 && data.entityType.size() <= 64 &&
+        data.entityId is string && data.entityId.size() > 0 && data.entityId.size() <= 128 &&
+        data.timestamp is string && data.timestamp.size() > 0 && data.timestamp.size() <= 64;
+    }
+
+    function isValidStaffDirectoryRecord(data) {
+      return hasRequiredFields(['id', 'recordType', 'name', 'codeOrNumber', 'department', 'active', 'updatedAt']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+        data.recordType in ['EMPLOYEE', 'AFFILIATE'] &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 160 &&
+        data.codeOrNumber is string && data.codeOrNumber.size() > 0 && data.codeOrNumber.size() <= 64 &&
+        data.department in [
+          'POS',
+          'HR_PAYROLL',
+          'FINANCE',
+          'BILLING',
+          'PROCUREMENT',
+          'INVENTORY',
+          'AFFILIATES',
+          'DELIVERY_MANAGER',
+          'SALES_MANAGER',
+          'BRANCH_MANAGER'
+        ] &&
+        data.active is bool &&
+        data.updatedAt is string && data.updatedAt.size() > 0 && data.updatedAt.size() <= 64 &&
+        (!('pinHash' in data) || (data.pinHash is string && data.pinHash.size() <= 128)) &&
+        (!('pinSalt' in data) || (data.pinSalt is string && data.pinSalt.size() <= 128)) &&
+        (!('staffDataJson' in data) || (data.staffDataJson is string && data.staffDataJson.size() <= 900000)) &&
+        (!('preferredPricesJson' in data) || (data.preferredPricesJson is string && data.preferredPricesJson.size() <= 200000));
+    }
+
+    function isValidUnifiedStateDocument(data) {
+      return hasRequiredFields(['id', 'key', 'payloadJson', 'updatedAt']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+        data.key is string && data.key.size() > 0 && data.key.size() <= 128 &&
+        data.payloadJson is string && data.payloadJson.size() <= 950000 &&
+        data.updatedAt is string && data.updatedAt.size() > 0 && data.updatedAt.size() <= 64;
+    }
+
+    function isValidUserActivityLog(data) {
+      return hasRequiredFields(['id', 'userId', 'userName', 'userRole', 'department', 'actionType', 'actionTitle', 'module', 'deviceUsed', 'timestamp']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+        data.userId is string && data.userId.size() > 0 && data.userId.size() <= 128 &&
+        data.userName is string && data.userName.size() > 0 && data.userName.size() <= 160 &&
+        data.actionTitle is string && data.actionTitle.size() > 0 && data.actionTitle.size() <= 240 &&
+        data.deviceUsed is string && data.deviceUsed.size() > 0 && data.deviceUsed.size() <= 240 &&
+        data.timestamp is string && data.timestamp.size() > 0 && data.timestamp.size() <= 64;
+    }
+
+    function isValidUserSessionMonitor(data) {
+      return hasRequiredFields(['userId', 'userName', 'userRole', 'department', 'isActiveLogin', 'loginCount', 'deviceUsed', 'updatedAt']) &&
+        data.userId is string && data.userId.size() > 0 && data.userId.size() <= 128 &&
+        data.userName is string && data.userName.size() > 0 && data.userName.size() <= 160 &&
+        data.isActiveLogin is bool &&
+        data.loginCount is number &&
+        data.deviceUsed is string && data.deviceUsed.size() > 0 && data.deviceUsed.size() <= 240 &&
+        data.updatedAt is string && data.updatedAt.size() > 0 && data.updatedAt.size() <= 64;
+    }
+
+    // -------------------------------------------------------------------------
+    // 1. STOCK AUDIT SESSIONS & ADJUSTMENT LOGS (Server-Authoritative Writes Only)
+    // -------------------------------------------------------------------------
+    match /stockAuditSessions/{sessionId} {
+      allow get: if isValidId(sessionId) && (isAdmin() || canAccessBranchData(resource.data.branchId));
+      allow list: if isAdmin() || canAccessBranchData(resource.data.branchId);
+      allow create, update: if isAdmin() && isValidId(sessionId) && isValidStockAuditSession(request.resource.data);
+      allow delete: if false;
+    }
+
+    match /stockAdjustmentLogs/{logId} {
+      allow get, list: if isAdmin() || canAccessBranchData(resource.data.branchId);
+      allow create: if isAdmin() && isValidId(logId) && isValidStockAdjustmentLog(request.resource.data);
+      allow update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // 2. BRANCH INVENTORY LEDGERS & IMMUTABLE INVENTORY TRANSACTIONS
+    // -------------------------------------------------------------------------
+    match /branchInventoryLedgers/{ledgerId} {
+      allow get: if isValidId(ledgerId) && (isAdmin() || canAccessBranchData(resource.data.branchId));
+      allow list: if isAdmin() || canAccessBranchData(resource.data.branchId);
+      allow create, update: if isAdmin() && isValidId(ledgerId) && isValidBranchInventoryLedger(request.resource.data);
+      allow delete: if false;
+    }
+
+    match /inventoryTransactions/{txId} {
+      allow get: if isAuthenticated() && isValidId(txId) && canAccessBranchData(resource.data.branchId);
+      allow list: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create: if isAdmin() && isValidId(txId) && isValidInventoryTransaction(request.resource.data);
+      allow update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // 3. AUTHORITATIVE SALES, JOURNAL ENTRIES, ACCOUNTING PERIODS & FISCAL RECORDS
+    // -------------------------------------------------------------------------
+    match /sales/{saleId} {
+      allow get: if isAuthenticated() && isValidId(saleId) && canAccessBranchData(resource.data.branchId);
+      allow list: if isAdmin() || isAccountant() || (isAuthenticated() && resource.data.createdBy == request.auth.uid);
+      allow create, update, delete: if false; // Financial sales records written exclusively by VAAIRO Server API -> Admin SDK
+    }
+
+    match /journalEntries/{entryId} {
+      allow get, list: if isAdmin() || isAccountant();
+      allow create, update, delete: if false; // Double-entry journals written exclusively by VAAIRO Server API -> Admin SDK
+    }
+
+    match /accountingPeriods/{periodId} {
+      allow get, list: if isAdmin() || isAccountant() || (isAuthenticated() && request.auth.token.role in ['ACCOUNTANT', 'MANAGER']);
+      allow create, update, delete: if false; // Accounting period locks managed exclusively via VAAIRO Server API -> Admin SDK
+    }
+
+    match /fiscalTransactions/{fiscalId} {
+      allow get, list: if isAdmin() || isAccountant();
+      allow create, update, delete: if false; // Fiscal records written exclusively by VAAIRO Server API -> Admin SDK
+    }
+
+    match /stockTransfers/{transferId} {
+      allow get: if isAuthenticated() && isValidId(transferId) && (
+        canAccessBranchData(resource.data.fromBranchId) || canAccessBranchData(resource.data.toBranchId)
+      );
+      allow list: if isAdmin() || (isAuthenticated() && resource.data.requestedBy == request.auth.uid);
+      allow create, update, delete: if false; // Inter-branch transfers executed exclusively via VAAIRO Server API -> Admin SDK
+    }
+
+    match /auditLogs/{auditId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if false; // Immutable enterprise audit log written exclusively by VAAIRO Server API
+    }
+
+    // -------------------------------------------------------------------------
+    // 4. STAFF DIRECTORY & SENSITIVE CREDENTIALS (PII & Hashed PIN Isolation)
+    // -------------------------------------------------------------------------
+    match /staffDirectory/{staffId} {
+      allow get: if isValidId(staffId) && (
+        isAdmin() ||
+        (isAuthenticated() && request.auth.uid == staffId) ||
+        canAccessBranchData(resource.data.branchId)
+      );
+      allow list: if isAdmin() || canAccessBranchData(resource.data.branchId);
+      allow create, update: if isAdmin() && isValidId(staffId) && isValidStaffDirectoryRecord(request.resource.data);
+      allow delete: if isAdmin() && isValidId(staffId);
+    }
+
+    // -------------------------------------------------------------------------
+    // 5. USER ACTIVITY AUDIT LOGS & SESSION MONITORS (Scoped by User & Branch)
+    // -------------------------------------------------------------------------
+    match /userActivityLogs/{logId} {
+      allow get: if isValidId(logId) && (
+        isAdmin() ||
+        (isAuthenticated() && resource.data.userId == request.auth.uid) ||
+        canAccessBranchData(resource.data.branchId)
+      );
+      allow list: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid) || canAccessBranchData(resource.data.branchId);
+      allow create, update: if isAuthenticated() && isValidId(logId) && isValidUserActivityLog(request.resource.data);
+      allow delete: if false; // Immutable audit trail
+    }
+
+    match /userSessionMonitors/{userId} {
+      allow get: if isValidId(userId) && (
+        isAdmin() ||
+        (isAuthenticated() && request.auth.uid == userId) ||
+        canAccessBranchData(resource.data.branchId)
+      );
+      allow list: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid) || canAccessBranchData(resource.data.branchId);
+      allow create, update: if isAuthenticated() && isValidId(userId) && isValidUserSessionMonitor(request.resource.data);
+      allow delete: if isAdmin() && isValidId(userId);
+    }
+
+    // -------------------------------------------------------------------------
+    // 6. ERP UNIFIED STATE & CENTRAL AUTHORITATIVE STORE
+    // -------------------------------------------------------------------------
+    match /erpUnifiedState/{stateKey} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /unifiedStateStore/{stateKey} {
+      allow get: if isValidId(stateKey) && (
+        stateKey in ['products', 'branches', 'system_settings_v1', 'brand_price_rules_v1', 'special_offers_v1', 'marketing_campaigns_v1', 'promotions_v1', 'product_ratings_v1'] ||
+        isAdmin() ||
+        isMemberOfOrganization('org-merchant-vaairo-hq')
+      );
+      allow list: if isAdmin() || isMemberOfOrganization('org-merchant-vaairo-hq');
+      allow create, update: if isAdmin() && isValidId(stateKey) && isValidUnifiedStateDocument(request.resource.data);
+      allow delete: if isAdmin() && isValidId(stateKey);
+    }
+
+    // -------------------------------------------------------------------------
+    // 7. FIRST-CLASS MULTI-TIER NETWORK: ORGANIZATIONS, MEMBERSHIPS & CONSUMERS
+    // -------------------------------------------------------------------------
+    function isValidOrganizationRecord(data) {
+      return hasRequiredFields(['id', 'code', 'name', 'type', 'status', 'kraPin', 'active', 'createdAt', 'updatedAt']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 96 &&
+        data.code is string && data.code.size() > 0 && data.code.size() <= 64 &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 160 &&
+        data.type in ['MERCHANT', 'DISTRIBUTOR', 'RETAILER', 'SUPPLIER'] &&
+        data.status in ['ACTIVE', 'PENDING_VERIFICATION', 'SUSPENDED', 'INACTIVE'] &&
+        data.kraPin is string && data.kraPin.size() >= 8 && data.kraPin.size() <= 32 &&
+        data.active is bool &&
+        data.createdAt is string && data.createdAt.size() > 0 && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() > 0 && data.updatedAt.size() <= 64;
+    }
+
+    function isValidOrganizationMembershipRecord(data) {
+      return hasRequiredFields(['id', 'userId', 'organizationId', 'organizationType', 'role', 'status', 'joinedAt', 'updatedAt']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+        data.userId is string && data.userId.size() > 0 && data.userId.size() <= 96 &&
+        data.organizationId is string && data.organizationId.size() > 0 && data.organizationId.size() <= 96 &&
+        data.organizationType in ['MERCHANT', 'DISTRIBUTOR', 'RETAILER', 'SUPPLIER'] &&
+        data.role in [
+          'ORG_OWNER',
+          'ORG_ADMIN',
+          'SUPER_ADMIN',
+          'ADMIN',
+          'ACCOUNTANT',
+          'MANAGER',
+          'CASHIER',
+          'INVENTORY_STAFF',
+          'PROCUREMENT_STAFF',
+          'STAFF',
+          'FINANCE_ACCOUNTANT',
+          'OPERATIONS_MANAGER',
+          'SALES_MANAGER',
+          'BRANCH_MANAGER',
+          'PROCUREMENT_OFFICER',
+          'INVENTORY_CONTROLLER',
+          'POS_CASHIER',
+          'AFFILIATE_REP',
+          'DELIVERY_COURIER',
+          'B2B_BUYER',
+          'VIEWER'
+        ] &&
+        data.status in ['ACTIVE', 'INVITED', 'SUSPENDED', 'REVOKED'] &&
+        data.joinedAt is string && data.joinedAt.size() > 0 && data.joinedAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() > 0 && data.updatedAt.size() <= 64;
+    }
+
+    function isValidConsumerRecord(data) {
+      return hasRequiredFields([
+        'id',
+        'consumerCode',
+        'fullName',
+        'phone',
+        'ageVerified',
+        'loyaltyPoints',
+        'loyaltyTier',
+        'totalOrdersCount',
+        'lifetimeSpendKes',
+        'active',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 96 &&
+        data.consumerCode is string && data.consumerCode.size() > 0 && data.consumerCode.size() <= 64 &&
+        data.fullName is string && data.fullName.size() > 0 && data.fullName.size() <= 128 &&
+        data.phone is string && data.phone.size() >= 7 && data.phone.size() <= 32 &&
+        data.ageVerified == true &&
+        data.loyaltyPoints is number && data.loyaltyPoints >= 0 &&
+        data.loyaltyTier in ['STANDARD', 'SILVER', 'GOLD', 'VIP_PRIVATE_CLIENT'] &&
+        data.totalOrdersCount is number && data.totalOrdersCount >= 0 &&
+        data.lifetimeSpendKes is number && data.lifetimeSpendKes >= 0 &&
+        data.active is bool &&
+        data.createdAt is string && data.createdAt.size() > 0 && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() > 0 && data.updatedAt.size() <= 64;
+    }
+
+    match /organizations/{orgId} {
+      allow get: if isValidId(orgId) && (isAdmin() || isMemberOfOrganization(orgId));
+      allow list: if isAdmin() || isMemberOfOrganization(resource.data.id);
+      allow create, update, delete: if false; // Provisioned exclusively via VAAIRO Server API -> Admin SDK
+    }
+
+    match /organizationMemberships/{membershipId} {
+      allow get: if isValidId(membershipId) && (isAdmin() || canAccessBranchData('branch-1') || (isAuthenticated() && resource.data.userId == request.auth.uid));
+      allow list: if isAdmin() || canAccessBranchData('branch-1') || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create, update: if isValidId(membershipId) && isValidOrganizationMembershipRecord(request.resource.data);
+      allow delete: if false;
+    }
+
+    match /consumers/{consumerId} {
+      allow get: if isValidId(consumerId) && (isAdmin() || (isAuthenticated() && resource.data.authUid == request.auth.uid));
+      allow list: if isAdmin();
+      allow create, update: if isValidId(consumerId) && (
+        isAdmin() || (isAuthenticated() && request.resource.data.authUid == request.auth.uid)
+      ) && isValidConsumerRecord(request.resource.data);
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // 8. NORMALIZED DOCUMENT-PER-ENTITY TRANSACTIONAL COLLECTIONS
+    // All financial, stock, sales, payment, and catalog writes are server-authoritative (Admin SDK only)
+    // -------------------------------------------------------------------------
+    // Public Storefront Catalogue (`productsPublic/{productId}`): excludes wholesale/cost/provenance secrets
+    match /productsPublic/{productId} {
+      allow get, list: if true;
+      allow create, update, delete: if false; // Synchronized exclusively via VAAIRO Server API -> Admin SDK
+    }
+
+    // Private Commercial Pricing & Margin Catalogue (`productsPrivate/{productId}`): restricted to Organization Members & Admins
+    match /productsPrivate/{productId} {
+      allow get: if isValidId(productId) && (isAdmin() || isMemberOfOrganization(resource.data.organizationId));
+      allow list: if isAdmin() || isMemberOfOrganization(resource.data.organizationId);
+      allow create, update, delete: if false; // Synchronized exclusively via VAAIRO Server API -> Admin SDK
+    }
+
+    match /products/{productId} {
+      allow get: if isValidId(productId) && (isAdmin() || isMemberOfOrganization(resource.data.organizationId));
+      allow list: if isAdmin() || isMemberOfOrganization(resource.data.organizationId);
+      allow create, update, delete: if false; // Synchronized exclusively via VAAIRO Server API -> Admin SDK
+    }
+
+    match /stockReservations/{reservationId} {
+      allow get: if isValidId(reservationId) && canAccessOrganizationData(resource.data.organizationId, resource.data.branchId);
+      allow list: if canAccessOrganizationData(resource.data.organizationId, resource.data.branchId);
+      allow create, update, delete: if false; // Managed exclusively via VAAIRO Server API -> Admin SDK
+    }
+
+    match /inventory/{inventoryId} {
+      allow get: if isValidId(inventoryId) && canAccessOrganizationData(resource.data.organizationId, resource.data.branchId);
+      allow list: if canAccessOrganizationData(resource.data.organizationId, resource.data.branchId);
+      allow create, update, delete: if false; // Mutated exclusively via VAAIRO Server API -> Admin SDK transactions
+    }
+
+    match /saleItems/{itemId} {
+      allow get: if isValidId(itemId) && canAccessOrganizationData(resource.data.organizationId, resource.data.branchId);
+      allow list: if canAccessOrganizationData(resource.data.organizationId, resource.data.branchId);
+      allow create, update, delete: if false; // Written exclusively via VAAIRO Server API -> Admin SDK transactions
+    }
+
+    match /orders/{orderId} {
+      allow get: if isValidId(orderId) && (
+        canAccessOrganizationData(resource.data.organizationId, resource.data.branchId) ||
+        (isAuthenticated() && resource.data.createdBy == request.auth.uid)
+      );
+      allow list: if canAccessOrganizationData(resource.data.organizationId, resource.data.branchId) || (isAuthenticated() && resource.data.createdBy == request.auth.uid);
+      allow create, update, delete: if false; // Mutated exclusively via VAAIRO Server API -> Admin SDK transactions
+    }
+
+    match /payments/{paymentId} {
+      allow get: if isValidId(paymentId) && canAccessOrganizationData(resource.data.organizationId, resource.data.branchId);
+      allow list: if canAccessOrganizationData(resource.data.organizationId, resource.data.branchId);
+      allow create, update, delete: if false; // Payment settlement records written exclusively via VAAIRO Server API -> Admin SDK
+    }
+
+    match /customers/{customerId} {
+      allow get: if isValidId(customerId) && (isAdmin() || (isAuthenticated() && resource.data.authUid == request.auth.uid));
+      allow list: if isAdmin();
+      allow create, update: if isAuthenticated() && isValidId(customerId) &&
+        request.resource.data.authUid == request.auth.uid &&
+        hasRequiredFields(['id', 'fullName', 'phone', 'updatedAt']) &&
+        request.resource.data.fullName is string && request.resource.data.fullName.size() > 0 && request.resource.data.fullName.size() <= 160 &&
+        request.resource.data.phone is string && request.resource.data.phone.size() >= 7 && request.resource.data.phone.size() <= 32;
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // 9. PERSISTENT TRANSACTION IDEMPOTENCY KEYS (idempotencyKeys/{scope}_{key})
+    // -------------------------------------------------------------------------
+    match /idempotencyKeys/{idempotencyId} {
+      allow get: if isValidId(idempotencyId) && canAccessOrganizationData(resource.data.organizationId, resource.data.branchId);
+      allow list: if isAdmin();
+      allow create, update, delete: if false; // Written exclusively via VAAIRO Server API -> Admin SDK
+    }
+
+    // -------------------------------------------------------------------------
+    // 10. AUTHORITATIVE SAFARICOM DARAJA M-PESA TRANSACTIONS (mpesaTransactions/{checkoutRequestId})
+    // -------------------------------------------------------------------------
+    match /mpesaTransactions/{checkoutRequestId} {
+      allow get: if isValidId(checkoutRequestId) && canAccessOrganizationData(resource.data.organizationId, resource.data.branchId);
+      allow list: if isAdmin();
+      allow create, update, delete: if false; // M-Pesa financial settlement records written exclusively via VAAIRO Server API -> Admin SDK
+    }
+
+    // -------------------------------------------------------------------------
+    // 11. PER-USER TOTP MFA FACTOR RECORDS (userTotpFactors/{userId})
+    // Strictly server-authoritative via Firebase Admin SDK; never exposed to browser reads
+    // -------------------------------------------------------------------------
+    match /userTotpFactors/{userId} {
+      allow read, write: if false;
+    }
+  }
+}

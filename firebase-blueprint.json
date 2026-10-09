@@ -1,0 +1,640 @@
+{
+  "entities": {
+    "StockAuditSession": {
+      "title": "StockAuditSession",
+      "description": "Represents a 4-step Stock-Taking Audit Session assigned to a specific warehouse or retail shop branch, including the baseline expected ERP inventory snapshot, rapid universal barcode scanned counts, discrepancy/variance calculations, and audit approval status.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique audit session ID (e.g. AUD-2026-001)" },
+        "branchId": { "type": "string", "description": "Assigned branch ID (warehouse or retail shop)" },
+        "branchName": { "type": "string", "description": "Assigned branch name" },
+        "branchTier": { "type": "string", "description": "WAREHOUSE, DISTRIBUTOR, or LIQUOR_STORE" },
+        "status": {
+          "type": "string",
+          "enum": ["IN_PROGRESS", "PENDING_APPROVAL", "APPROVED", "CANCELLED"],
+          "description": "Current workflow step of the stock audit session"
+        },
+        "auditorId": { "type": "string", "description": "Employee/User ID of the stock manager or auditor" },
+        "auditorName": { "type": "string", "description": "Name of the auditor conducting the scan loop" },
+        "startedAt": { "type": "string", "description": "ISO timestamp when Step 1 baseline snapshot was initialized" },
+        "completedScanningAt": { "type": "string", "description": "ISO timestamp when physical scanning completed" },
+        "approvedAt": { "type": "string", "description": "ISO timestamp when senior manager approved the audit" },
+        "approvedBy": { "type": "string", "description": "Name and role of the store owner or senior manager who approved" },
+        "totalSkusInBaseline": { "type": "number", "description": "Total SKUs snapshotted from ERP baseline" },
+        "totalExpectedUnits": { "type": "number", "description": "Total expected bottles across snapshotted SKUs" },
+        "totalScannedUnits": { "type": "number", "description": "Total physical bottles scanned in the loop" },
+        "itemsMapJson": { "type": "string", "description": "Serialized map of SKU audit entries (baseline expected count, scanned count, universal barcode, bottle size, unit cost)" },
+        "recentScansJson": { "type": "string", "description": "Serialized array of most recent barcode scan events in the rapid scanning loop" }
+      },
+      "required": ["id", "branchId", "branchName", "status", "auditorName", "startedAt", "itemsMapJson"]
+    },
+    "StockAdjustmentLog": {
+      "title": "StockAdjustmentLog",
+      "description": "Automated stock adjustment log generated upon approving a Stock Audit Session for auditing accountability.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique adjustment log ID" },
+        "auditSessionId": { "type": "string", "description": "Reference to the parent StockAuditSession ID" },
+        "branchId": { "type": "string", "description": "Branch ID where ledger was adjusted" },
+        "branchName": { "type": "string", "description": "Branch name" },
+        "productId": { "type": "string", "description": "Product ID" },
+        "sku": { "type": "string", "description": "Product SKU (e.g. IPS-WHISKY-002)" },
+        "barcode": { "type": "string", "description": "Universal EAN-13 barcode (e.g. 500029912302)" },
+        "productName": { "type": "string", "description": "Product display name including bottle size" },
+        "expectedErpCount": { "type": "number", "description": "Baseline ERP expected count before adjustment" },
+        "physicalScannedCount": { "type": "number", "description": "Physical count from rapid barcode scanning loop" },
+        "variance": { "type": "number", "description": "Variance = Physical Count - Expected ERP Count" },
+        "discrepancyFlag": {
+          "type": "string",
+          "enum": ["MATCHED", "SHRINKAGE_LOSS", "SURPLUS_REVIEW"],
+          "description": "SHRINKAGE_LOSS if physical < expected, SURPLUS_REVIEW if physical > expected"
+        },
+        "unitCostKes": { "type": "number", "description": "Unit cost in KES for financial variance valuation" },
+        "varianceValueKes": { "type": "number", "description": "Financial impact in KES (variance * unitCostKes)" },
+        "auditorName": { "type": "string", "description": "Auditor who performed the physical count" },
+        "approvedBy": { "type": "string", "description": "Store owner or senior manager who approved the ledger adjustment" },
+        "createdAt": { "type": "string", "description": "ISO timestamp of approval and ledger adjustment" }
+      },
+      "required": [
+        "id",
+        "auditSessionId",
+        "branchId",
+        "sku",
+        "barcode",
+        "productName",
+        "expectedErpCount",
+        "physicalScannedCount",
+        "variance",
+        "discrepancyFlag",
+        "approvedBy",
+        "createdAt"
+      ]
+    },
+    "BranchInventoryLedger": {
+      "title": "BranchInventoryLedger",
+      "description": "Live branch inventory ledger synchronized in Firebase Firestore.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Composite key {branchId}_{productId}" },
+        "branchId": { "type": "string", "description": "Branch ID" },
+        "productId": { "type": "string", "description": "Product ID" },
+        "sku": { "type": "string", "description": "Product SKU" },
+        "barcode": { "type": "string", "description": "Universal barcode" },
+        "productName": { "type": "string", "description": "Product name" },
+        "quantity": { "type": "number", "description": "Live physical stock quantity in bottles" },
+        "lastAuditSessionId": { "type": "string", "description": "Last audit session that verified or adjusted this SKU" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last ledger update" }
+      },
+      "required": ["id", "branchId", "productId", "sku", "barcode", "quantity", "updatedAt"]
+    },
+    "InventoryTransaction": {
+      "title": "InventoryTransaction",
+      "description": "Immutable inventory ledger movement recording every stock addition, deduction, transfer, return, or adjustment.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique inventory transaction ID" },
+        "productId": { "type": "string", "description": "Product ID" },
+        "sku": { "type": "string", "description": "Product SKU" },
+        "productName": { "type": "string", "description": "Product name" },
+        "branchId": { "type": "string", "description": "Branch ID where stock changed" },
+        "transactionType": {
+          "type": "string",
+          "enum": [
+            "OPENING_BALANCE",
+            "PURCHASE",
+            "SALE",
+            "RETURN",
+            "TRANSFER_IN",
+            "TRANSFER_OUT",
+            "ADJUSTMENT",
+            "DAMAGE",
+            "LOSS",
+            "STOCK_COUNT"
+          ],
+          "description": "Categorized stock movement type"
+        },
+        "quantity": { "type": "number", "description": "Signed or absolute quantity of units moved" },
+        "beforeQuantity": { "type": "number", "description": "Authoritative stock balance before movement" },
+        "afterQuantity": { "type": "number", "description": "Authoritative stock balance after movement" },
+        "referenceId": { "type": "string", "description": "Document or transaction reference ID (e.g. ORD-..., TRF-..., PO-...)" },
+        "referenceType": { "type": "string", "description": "SALE, PURCHASE_ORDER, STOCK_TRANSFER, AUDIT_SESSION, MANUAL_ADJUSTMENT" },
+        "userId": { "type": "string", "description": "Authenticated user ID who executed the transaction" },
+        "userName": { "type": "string", "description": "Authenticated user display name" },
+        "reason": { "type": "string", "description": "Mandatory business reason for movement or adjustment" },
+        "timestamp": { "type": "string", "description": "Server ISO timestamp" }
+      },
+      "required": [
+        "id",
+        "productId",
+        "branchId",
+        "transactionType",
+        "quantity",
+        "beforeQuantity",
+        "afterQuantity",
+        "referenceId",
+        "referenceType",
+        "userId",
+        "timestamp",
+        "reason"
+      ]
+    },
+    "SaleRecord": {
+      "title": "SaleRecord",
+      "description": "Authoritative POS or Storefront sale record validated by the backend.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique sale ID" },
+        "orderNumber": { "type": "string", "description": "Sequential official order number" },
+        "branchId": { "type": "string", "description": "Branch ID" },
+        "subtotalKes": { "type": "number", "description": "Net taxable amount in KES" },
+        "discountKes": { "type": "number", "description": "Authorized discount in KES" },
+        "vatAmountKes": { "type": "number", "description": "Computed tax amount in KES" },
+        "totalAmountKes": { "type": "number", "description": "Final grand total in KES" },
+        "paymentMethod": { "type": "string", "enum": ["CASH", "MPESA", "CARD", "SPLIT", "CREDIT"], "description": "Payment method" },
+        "status": { "type": "string", "enum": ["COMPLETED", "REFUNDED", "VOIDED"], "description": "Immutable sale lifecycle status" },
+        "idempotencyKey": { "type": "string", "description": "Idempotency key preventing duplicate submissions" },
+        "createdBy": { "type": "string", "description": "Authenticated user ID" },
+        "createdAt": { "type": "string", "description": "Server ISO timestamp" }
+      },
+      "required": ["id", "orderNumber", "branchId", "subtotalKes", "vatAmountKes", "totalAmountKes", "paymentMethod", "status", "createdBy", "createdAt"]
+    },
+    "JournalEntryRecord": {
+      "title": "JournalEntryRecord",
+      "description": "Immutable balanced double-entry accounting journal record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique journal entry ID" },
+        "entryNumber": { "type": "string", "description": "Sequential journal entry number" },
+        "referenceNumber": { "type": "string", "description": "Source transaction reference number" },
+        "periodId": { "type": "string", "description": "Accounting period YYYY-MM" },
+        "branchId": { "type": "string", "description": "Branch ID" },
+        "date": { "type": "string", "description": "Accounting date YYYY-MM-DD" },
+        "description": { "type": "string", "description": "Journal narrative" },
+        "totalDebitKes": { "type": "number", "description": "Total debits in KES (must equal totalCreditKes)" },
+        "totalCreditKes": { "type": "number", "description": "Total credits in KES (must equal totalDebitKes)" },
+        "linesJson": { "type": "string", "description": "Serialized balanced journal lines" },
+        "postedBy": { "type": "string", "description": "User who posted the entry" },
+        "createdAt": { "type": "string", "description": "Server ISO timestamp" }
+      },
+      "required": ["id", "entryNumber", "referenceNumber", "periodId", "date", "description", "totalDebitKes", "totalCreditKes", "postedBy", "createdAt"]
+    },
+    "AccountingPeriodRecord": {
+      "title": "AccountingPeriodRecord",
+      "description": "Controls open/closed financial reporting periods to prevent unauthorized historical tampering.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Period identifier YYYY-MM (e.g. 2026-10)" },
+        "name": { "type": "string", "description": "Human-readable period name (e.g. October 2026)" },
+        "status": { "type": "string", "enum": ["OPEN", "CLOSED", "REOPENED"], "description": "Period lock status" },
+        "closedAt": { "type": "string", "description": "ISO timestamp when closed" },
+        "closedBy": { "type": "string", "description": "User ID who closed the period" },
+        "reopenedAt": { "type": "string", "description": "ISO timestamp when reopened" },
+        "reopenedBy": { "type": "string", "description": "Super Admin ID who reopened the period" },
+        "reopenReason": { "type": "string", "description": "Mandatory audit reason for reopening" },
+        "updatedAt": { "type": "string", "description": "Last status change timestamp" }
+      },
+      "required": ["id", "name", "status", "updatedAt"]
+    },
+    "FiscalTransactionRecord": {
+      "title": "FiscalTransactionRecord",
+      "description": "KRA eTIMS fiscal transaction lifecycle record with retry & failure tracking.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique fiscal record ID" },
+        "invoiceNumber": { "type": "string", "description": "Associated invoice or order number" },
+        "branchId": { "type": "string", "description": "Branch ID" },
+        "grossAmountKes": { "type": "number", "description": "Gross invoice amount in KES" },
+        "vatAmountKes": { "type": "number", "description": "Tax amount in KES" },
+        "status": {
+          "type": "string",
+          "enum": ["PENDING", "SUBMITTING", "SUCCESS", "FAILED", "RETRY_PENDING", "CANCELLED"],
+          "description": "Authoritative fiscal transmission state"
+        },
+        "requestReference": { "type": "string", "description": "Outbound request reference ID" },
+        "responseReference": { "type": "string", "description": "Upstream response reference ID" },
+        "fiscalIdentifier": { "type": "string", "description": "Control unit / fiscal invoice identifier when succeeded" },
+        "submissionTimestamp": { "type": "string", "description": "ISO timestamp of submission attempt" },
+        "responseTimestamp": { "type": "string", "description": "ISO timestamp of upstream response" },
+        "errorCode": { "type": "string", "description": "Upstream or gateway error code if failed" },
+        "errorMessage": { "type": "string", "description": "Diagnostic failure reason if failed" },
+        "retryCount": { "type": "number", "description": "Number of transmission retries attempted" }
+      },
+      "required": ["id", "invoiceNumber", "grossAmountKes", "vatAmountKes", "status", "requestReference", "submissionTimestamp", "retryCount"]
+    },
+    "StockTransferRecord": {
+      "title": "StockTransferRecord",
+      "description": "Formal inter-branch stock transfer workflow record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique transfer ID" },
+        "transferNumber": { "type": "string", "description": "Sequential transfer document number" },
+        "fromBranchId": { "type": "string", "description": "Source branch ID (TRANSFER_OUT)" },
+        "toBranchId": { "type": "string", "description": "Destination branch ID (TRANSFER_IN)" },
+        "status": {
+          "type": "string",
+          "enum": ["DRAFT", "REQUESTED", "APPROVED", "DISPATCHED", "RECEIVED", "CANCELLED"],
+          "description": "Formal transfer workflow state"
+        },
+        "itemsJson": { "type": "string", "description": "Serialized list of transferred products and quantities" },
+        "requestedBy": { "type": "string", "description": "User who requested the transfer" },
+        "approvedBy": { "type": "string", "description": "Manager/Admin who approved the transfer" },
+        "receivedBy": { "type": "string", "description": "Receiving branch user who confirmed receipt" },
+        "createdAt": { "type": "string", "description": "Creation ISO timestamp" },
+        "updatedAt": { "type": "string", "description": "Last state transition ISO timestamp" }
+      },
+      "required": ["id", "transferNumber", "fromBranchId", "toBranchId", "status", "itemsJson", "requestedBy", "createdAt", "updatedAt"]
+    },
+    "AuditLogRecord": {
+      "title": "AuditLogRecord",
+      "description": "Centralized immutable enterprise audit log with before/after snapshots.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique audit log ID" },
+        "userId": { "type": "string", "description": "Authenticated user ID" },
+        "userName": { "type": "string", "description": "Authenticated user name" },
+        "userRole": { "type": "string", "description": "Role at time of action" },
+        "branchId": { "type": "string", "description": "Branch context" },
+        "action": { "type": "string", "description": "Action identifier" },
+        "module": { "type": "string", "description": "ERP module" },
+        "entityType": { "type": "string", "description": "Target entity type (SALE, INVENTORY, INVOICE, PERIOD, USER, etc.)" },
+        "entityId": { "type": "string", "description": "Target entity ID" },
+        "beforeJson": { "type": "string", "description": "State snapshot before mutation" },
+        "afterJson": { "type": "string", "description": "State snapshot after mutation" },
+        "ipAddress": { "type": "string", "description": "Client IP address" },
+        "userAgent": { "type": "string", "description": "Client User-Agent / device telemetry" },
+        "timestamp": { "type": "string", "description": "Server ISO timestamp" }
+      },
+      "required": ["id", "userId", "action", "module", "entityType", "entityId", "timestamp"]
+    },
+    "StaffDirectoryRecord": {
+      "title": "StaffDirectoryRecord",
+      "description": "Independent staff database record storing staff & sales representative hashed credentials, department, branch assignment, commission configuration, statutory HR profile, and real-time operational data.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique staff or affiliate ID (e.g. emp-12345 or aff-12345)" },
+        "recordType": {
+          "type": "string",
+          "enum": ["EMPLOYEE", "AFFILIATE"],
+          "description": "Whether the staff record is a core ERP Employee or a Sales Representative Affiliate"
+        },
+        "name": { "type": "string", "description": "Full name of the staff member" },
+        "codeOrNumber": { "type": "string", "description": "Employee number (e.g. EMP-101) or Sales Rep code (e.g. SR-JANE-01)" },
+        "roleTitle": { "type": "string", "description": "Job title or role label" },
+        "department": { "type": "string", "description": "Assigned ERP department" },
+        "branchId": { "type": "string", "description": "Assigned branch ID" },
+        "branchName": { "type": "string", "description": "Assigned branch name" },
+        "pinHash": { "type": "string", "description": "Salted SHA-256 hash of the 6-digit PIN" },
+        "pinSalt": { "type": "string", "description": "Cryptographic random salt for PIN hashing" },
+        "phone": { "type": "string", "description": "Phone / M-Pesa number" },
+        "employmentType": { "type": "string", "description": "CASUAL or SALARIED" },
+        "compensationModel": { "type": "string", "description": "COMMISSION_ONLY or MONTHLY_SALARY" },
+        "commissionRatePercent": { "type": "number", "description": "Commission rate percentage" },
+        "commissionMode": { "type": "string", "description": "Commission calculation mode for Sales Representatives" },
+        "allowPreferredPrice": { "type": "boolean", "description": "Whether preferred selling prices are enabled" },
+        "assignedCashierId": { "type": "string", "description": "Assigned POS Counter Cashier ID for Sales Reps" },
+        "assignedCashierName": { "type": "string", "description": "Assigned POS Counter Cashier name" },
+        "totalSalesKes": { "type": "number", "description": "Cumulative sales attributed to this staff member in KES" },
+        "companySalesTotalKes": { "type": "number", "description": "Company baseline sales total in KES" },
+        "preferredPriceProfitTotalKes": { "type": "number", "description": "Preferred price markup profit total in KES" },
+        "baseCommissionTotalKes": { "type": "number", "description": "Base percentage commission total in KES" },
+        "totalCommissionEarnedKes": { "type": "number", "description": "Total commission earned in KES" },
+        "paidCommissionKes": { "type": "number", "description": "Total commission already paid out in KES" },
+        "pendingCommissionKes": { "type": "number", "description": "Current unpaid pending commission in KES" },
+        "basicSalaryKes": { "type": "number", "description": "Basic monthly salary in KES for salaried staff" },
+        "houseAllowanceKes": { "type": "number", "description": "Monthly house allowance in KES" },
+        "transportAllowanceKes": { "type": "number", "description": "Monthly transport allowance in KES" },
+        "kraPin": { "type": "string", "description": "Employee KRA PIN" },
+        "nssfNumber": { "type": "string", "description": "Employee NSSF number" },
+        "nhifShifNumber": { "type": "string", "description": "Employee SHIF number" },
+        "bankName": { "type": "string", "description": "Employee bank name" },
+        "bankAccount": { "type": "string", "description": "Employee bank account number" },
+        "customSlug": { "type": "string", "description": "Custom slug for Sales Representative" },
+        "preferredPricesJson": { "type": "string", "description": "Serialized JSON map of per-product preferred prices" },
+        "staffDataJson": { "type": "string", "description": "Serialized JSON snapshot of staff personal workspace data" },
+        "active": { "type": "boolean", "description": "Whether the staff account is active for login" },
+        "lastLoginAt": { "type": "string", "description": "ISO timestamp of most recent terminal login" },
+        "loginCount": { "type": "number", "description": "Total number of instant logins recorded" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last database sync" }
+      },
+      "required": ["id", "recordType", "name", "codeOrNumber", "department", "active", "updatedAt"]
+    },
+    "UserActivityLog": {
+      "title": "UserActivityLog",
+      "description": "Real-time audit log of user activities across all ERP dashboards, including logins, logouts, sales, statement generation, and device telemetry.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique activity log ID" },
+        "userId": { "type": "string", "description": "User or Staff ID" },
+        "userName": { "type": "string", "description": "Display name of the user" },
+        "userRole": { "type": "string", "description": "SUPER_ADMIN, ACCOUNTANT, or STAFF" },
+        "department": { "type": "string", "description": "ERP department" },
+        "branchId": { "type": "string", "description": "Branch ID" },
+        "branchName": { "type": "string", "description": "Branch name" },
+        "actionType": { "type": "string", "description": "Activity action category" },
+        "actionTitle": { "type": "string", "description": "Short summary of the user activity" },
+        "actionDetails": { "type": "string", "description": "Detailed description of the action" },
+        "module": { "type": "string", "description": "Dashboard or module where the action occurred" },
+        "deviceUsed": { "type": "string", "description": "Device, browser, OS, and viewport used" },
+        "deviceType": { "type": "string", "enum": ["DESKTOP", "MOBILE", "TABLET"], "description": "Device form factor" },
+        "browserOs": { "type": "string", "description": "Browser and OS string" },
+        "timestamp": { "type": "string", "description": "ISO timestamp of the activity" }
+      },
+      "required": ["id", "userId", "userName", "userRole", "department", "actionType", "actionTitle", "module", "deviceUsed", "timestamp"]
+    },
+    "UserSessionMonitorRecord": {
+      "title": "UserSessionMonitorRecord",
+      "description": "Live session and login telemetry record per user, tracking active login state, last login timestamp, login count, latest activity action, and device used.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "User or Staff ID" },
+        "userName": { "type": "string", "description": "User name" },
+        "employeeNumberOrCode": { "type": "string", "description": "Staff code or employee number" },
+        "userRole": { "type": "string", "description": "Role of the user" },
+        "department": { "type": "string", "description": "Department of the user" },
+        "branchId": { "type": "string", "description": "Assigned or active branch ID" },
+        "branchName": { "type": "string", "description": "Assigned or active branch name" },
+        "isActiveLogin": { "type": "boolean", "description": "Whether the user currently has an active login session" },
+        "activeLoginAt": { "type": "string", "description": "ISO timestamp when current active login started" },
+        "lastLoginAt": { "type": "string", "description": "ISO timestamp of last login" },
+        "lastLogoutAt": { "type": "string", "description": "ISO timestamp of last logout" },
+        "lastHeartbeatAt": { "type": "string", "description": "ISO timestamp of latest session activity" },
+        "loginCount": { "type": "number", "description": "Total login count" },
+        "lastActionTitle": { "type": "string", "description": "Title of the user's most recent activity action" },
+        "lastActionDetails": { "type": "string", "description": "Details of the user's most recent activity action" },
+        "lastActionAt": { "type": "string", "description": "ISO timestamp of the most recent activity action" },
+        "currentModule": { "type": "string", "description": "Current dashboard module" },
+        "deviceUsed": { "type": "string", "description": "Device used during session" },
+        "deviceType": { "type": "string", "enum": ["DESKTOP", "MOBILE", "TABLET"], "description": "Device form factor" },
+        "browserOs": { "type": "string", "description": "Browser and OS" },
+        "authMethod": { "type": "string", "description": "Authentication method used" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last session monitor update" }
+      },
+      "required": ["userId", "userName", "userRole", "department", "isActiveLogin", "deviceUsed", "updatedAt"]
+    },
+    "UnifiedStateDocument": {
+      "title": "UnifiedStateDocument",
+      "description": "Stores unified ERP state collections in Firestore for real-time cross-device and cross-module data unification.",
+      "type": "object",
+      "properties": {
+        "key": { "type": "string", "description": "ERP state collection key" },
+        "payloadJson": { "type": "string", "description": "Serialized JSON payload of the unified ERP collection" },
+        "recordCount": { "type": "number", "description": "Number of records in this state collection" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last unification sync" },
+        "updatedBy": { "type": "string", "description": "User or system engine that published the update" },
+        "deviceOrigin": { "type": "string", "description": "Client instance ID that published the update" }
+      },
+      "required": ["key", "payloadJson", "recordCount", "updatedAt"]
+    },
+    "OrganizationRecord": {
+      "title": "OrganizationRecord",
+      "description": "First-class multi-tier B2B network organization entity (Merchant, Distributor, Retailer, or Supplier).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique organization identifier" },
+        "code": { "type": "string", "description": "Organization reference code" },
+        "name": { "type": "string", "description": "Trading name of the organization" },
+        "legalName": { "type": "string", "description": "Registered legal entity name" },
+        "type": {
+          "type": "string",
+          "enum": ["MERCHANT", "DISTRIBUTOR", "RETAILER", "SUPPLIER"],
+          "description": "First-class organization archetype"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ACTIVE", "PENDING_VERIFICATION", "SUSPENDED", "INACTIVE"],
+          "description": "Verification and operational status"
+        },
+        "kraPin": { "type": "string", "description": "KRA PIN of the organization" },
+        "contactPerson": { "type": "string", "description": "Primary contact person name" },
+        "email": { "type": "string", "description": "Organization contact email" },
+        "phone": { "type": "string", "description": "Organization contact phone" },
+        "county": { "type": "string", "description": "Kenyan county location" },
+        "creditLimitKes": { "type": "number", "description": "Credit limit in KES" },
+        "currentBalanceKes": { "type": "number", "description": "Current receivable/payable balance in KES" },
+        "active": { "type": "boolean", "description": "Whether the organization is active" },
+        "createdAt": { "type": "string", "description": "ISO creation timestamp" },
+        "updatedAt": { "type": "string", "description": "ISO last update timestamp" }
+      },
+      "required": ["id", "code", "name", "type", "status", "kraPin", "active", "createdAt", "updatedAt"]
+    },
+    "OrganizationMembershipRecord": {
+      "title": "OrganizationMembershipRecord",
+      "description": "Relational link binding User -> Membership -> Organization -> Role.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Deterministic membership ID (mem_{userId}_{organizationId})" },
+        "userId": { "type": "string", "description": "User identifier" },
+        "userName": { "type": "string", "description": "User display name" },
+        "userEmail": { "type": "string", "description": "User email address" },
+        "organizationId": { "type": "string", "description": "Target Organization ID" },
+        "organizationName": { "type": "string", "description": "Target Organization name" },
+        "organizationType": {
+          "type": "string",
+          "enum": ["MERCHANT", "DISTRIBUTOR", "RETAILER", "SUPPLIER"],
+          "description": "Target Organization archetype"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "ORG_OWNER",
+            "ORG_ADMIN",
+            "FINANCE_ACCOUNTANT",
+            "OPERATIONS_MANAGER",
+            "SALES_MANAGER",
+            "BRANCH_MANAGER",
+            "PROCUREMENT_OFFICER",
+            "INVENTORY_CONTROLLER",
+            "POS_CASHIER",
+            "AFFILIATE_REP",
+            "DELIVERY_COURIER",
+            "B2B_BUYER",
+            "VIEWER"
+          ],
+          "description": "Role held by the user within the organization"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ACTIVE", "INVITED", "SUSPENDED", "REVOKED"],
+          "description": "Membership lifecycle status"
+        },
+        "joinedAt": { "type": "string", "description": "ISO timestamp when membership was created" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp when membership was last updated" }
+      },
+      "required": ["id", "userId", "organizationId", "organizationType", "role", "status", "joinedAt", "updatedAt"]
+    },
+    "ConsumerRecord": {
+      "title": "ConsumerRecord",
+      "description": "First-class individual customer identity for B2C Storefront and Retail POS buyers.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique consumer identifier" },
+        "consumerCode": { "type": "string", "description": "Human-readable consumer code (e.g. CON-2026-0001)" },
+        "fullName": { "type": "string", "description": "Consumer full name" },
+        "phone": { "type": "string", "description": "Consumer phone number" },
+        "email": { "type": "string", "description": "Optional consumer email" },
+        "ageVerified": { "type": "boolean", "description": "18+ age verification flag" },
+        "loyaltyPoints": { "type": "number", "description": "Accumulated loyalty points" },
+        "loyaltyTier": {
+          "type": "string",
+          "enum": ["STANDARD", "SILVER", "GOLD", "VIP_PRIVATE_CLIENT"],
+          "description": "Consumer loyalty tier"
+        },
+        "totalOrdersCount": { "type": "number", "description": "Total completed retail/storefront orders" },
+        "lifetimeSpendKes": { "type": "number", "description": "Total lifetime spend in KES" },
+        "active": { "type": "boolean", "description": "Whether the consumer profile is active" },
+        "createdAt": { "type": "string", "description": "ISO creation timestamp" },
+        "updatedAt": { "type": "string", "description": "ISO update timestamp" }
+      },
+      "required": ["id", "consumerCode", "fullName", "phone", "ageVerified", "loyaltyPoints", "loyaltyTier", "totalOrdersCount", "lifetimeSpendKes", "active", "createdAt", "updatedAt"]
+    },
+    "MpesaTransactionRecord": {
+      "title": "MpesaTransactionRecord",
+      "description": "Authoritative Safaricom Daraja STK Push & C2B transaction record storing pending initiation, callback verification, and reconciliation status.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Document ID matching sanitized CheckoutRequestID" },
+        "checkoutRequestId": { "type": "string", "description": "Safaricom Daraja CheckoutRequestID" },
+        "merchantRequestId": { "type": "string", "description": "Safaricom Daraja MerchantRequestID" },
+        "organizationId": { "type": "string", "description": "Organization ID" },
+        "branchId": { "type": "string", "description": "Fulfilling branch ID" },
+        "orderNumber": { "type": "string", "description": "Associated ERP order number" },
+        "accountReference": { "type": "string", "description": "Daraja AccountReference" },
+        "transactionDesc": { "type": "string", "description": "Daraja TransactionDesc" },
+        "expectedAmountKes": { "type": "number", "description": "Expected payment amount in KES" },
+        "confirmedAmountKes": { "type": "number", "description": "Confirmed payment amount from Daraja callback/query" },
+        "expectedPhone": { "type": "string", "description": "Normalized 2547XXXXXXXX or 2541XXXXXXXX phone" },
+        "confirmedPhone": { "type": "string", "description": "Confirmed phone from Daraja callback" },
+        "shortCode": { "type": "string", "description": "Safaricom Paybill or Till ShortCode" },
+        "transactionType": {
+          "type": "string",
+          "enum": ["CustomerPayBillOnline", "CustomerBuyGoodsOnline", "C2B_DIRECT"],
+          "description": "Daraja transaction type"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["PENDING", "CONFIRMED", "FAILED", "CANCELLED", "EXPIRED"],
+          "description": "Lifecycle status of the Daraja transaction"
+        },
+        "resultCode": { "type": "number", "description": "Safaricom Daraja ResultCode (0 = success)" },
+        "resultDesc": { "type": "string", "description": "Safaricom Daraja ResultDesc" },
+        "mpesaReceiptNumber": { "type": "string", "description": "Verified Safaricom M-Pesa Receipt Number" },
+        "transactionDate": { "type": "string", "description": "Daraja TransactionDate" },
+        "callbackSignatureToken": { "type": "string", "description": "Cryptographic HMAC token verifying callback authenticity" },
+        "rawCallbackPayload": { "type": "string", "description": "Immutable JSON string of the Daraja callback or query payload" },
+        "verifiedVia": {
+          "type": "string",
+          "enum": ["DARAJA_STK_CALLBACK", "DARAJA_STK_QUERY", "DARAJA_C2B_CONFIRMATION"],
+          "description": "Verification channel"
+        },
+        "reconciledToOrderId": { "type": "string", "description": "Order ID this payment was reconciled against" },
+        "reconciledAt": { "type": "string", "description": "ISO timestamp of order reconciliation" },
+        "createdAt": { "type": "string", "description": "ISO creation timestamp" },
+        "updatedAt": { "type": "string", "description": "ISO update timestamp" }
+      },
+      "required": ["id", "checkoutRequestId", "merchantRequestId", "organizationId", "branchId", "orderNumber", "accountReference", "expectedAmountKes", "expectedPhone", "shortCode", "transactionType", "status", "callbackSignatureToken", "createdAt", "updatedAt"]
+    },
+    "UserTotpFactorRecord": {
+      "title": "UserTotpFactorRecord",
+      "description": "Server-controlled per-user TOTP MFA factor record binding an individual user (UID + email) to their isolated RFC 6238 TOTP secret or Firebase TOTP MFA factor.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase UID or ERP User ID" },
+        "email": { "type": "string", "description": "Verified user email address" },
+        "organizationId": { "type": "string", "description": "Organization ID" },
+        "totpSecret": { "type": "string", "description": "Per-user Base32 TOTP secret (server-only)" },
+        "mfaEnabled": { "type": "boolean", "description": "Whether per-user TOTP MFA is active" },
+        "factorType": {
+          "type": "string",
+          "enum": ["FIREBASE_TOTP_MFA", "PER_USER_RFC6238_TOTP"],
+          "description": "MFA factor mechanism"
+        },
+        "firebaseFactorUid": { "type": "string", "description": "Optional Firebase Auth MultiFactorInfo UID" },
+        "enrolledAt": { "type": "string", "description": "ISO timestamp when factor was enrolled" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp when factor was updated" }
+      },
+      "required": ["userId", "email", "organizationId", "totpSecret", "mfaEnabled", "factorType", "enrolledAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/userTotpFactors/{userId}": {
+      "schema": { "$ref": "#/entities/UserTotpFactorRecord" },
+      "description": "Stores server-controlled per-user TOTP MFA factor records."
+    },
+    "/organizations/{orgId}": {
+      "schema": { "$ref": "#/entities/OrganizationRecord" },
+      "description": "Stores first-class Organizations (Merchant, Distributor, Retailer, Supplier)."
+    },
+    "/organizationMemberships/{membershipId}": {
+      "schema": { "$ref": "#/entities/OrganizationMembershipRecord" },
+      "description": "Stores relational User -> Membership -> Organization -> Role records."
+    },
+    "/consumers/{consumerId}": {
+      "schema": { "$ref": "#/entities/ConsumerRecord" },
+      "description": "Stores first-class individual Consumer customer identities."
+    },
+    "/stockAuditSessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/StockAuditSession" },
+      "description": "Stores active and historical stock-taking audit sessions per branch."
+    },
+    "/stockAdjustmentLogs/{logId}": {
+      "schema": { "$ref": "#/entities/StockAdjustmentLog" },
+      "description": "Stores immutable stock adjustment audit trail logs created when an audit is approved."
+    },
+    "/branchInventoryLedgers/{ledgerId}": {
+      "schema": { "$ref": "#/entities/BranchInventoryLedger" },
+      "description": "Stores live branch inventory quantities synchronized with the ERP."
+    },
+    "/inventoryTransactions/{txId}": {
+      "schema": { "$ref": "#/entities/InventoryTransaction" },
+      "description": "Stores immutable inventory ledger movements for every stock change across branches."
+    },
+    "/sales/{saleId}": {
+      "schema": { "$ref": "#/entities/SaleRecord" },
+      "description": "Stores authoritative server-validated POS and storefront sales."
+    },
+    "/journalEntries/{entryId}": {
+      "schema": { "$ref": "#/entities/JournalEntryRecord" },
+      "description": "Stores balanced double-entry accounting journal entries."
+    },
+    "/accountingPeriods/{periodId}": {
+      "schema": { "$ref": "#/entities/AccountingPeriodRecord" },
+      "description": "Stores open and closed financial accounting periods."
+    },
+    "/fiscalTransactions/{fiscalId}": {
+      "schema": { "$ref": "#/entities/FiscalTransactionRecord" },
+      "description": "Stores KRA eTIMS fiscalization lifecycle records and retry states."
+    },
+    "/stockTransfers/{transferId}": {
+      "schema": { "$ref": "#/entities/StockTransferRecord" },
+      "description": "Stores formal inter-branch stock transfer workflows."
+    },
+    "/auditLogs/{auditId}": {
+      "schema": { "$ref": "#/entities/AuditLogRecord" },
+      "description": "Stores centralized immutable enterprise audit logs with before/after snapshots."
+    },
+    "/staffDirectory/{staffId}": {
+      "schema": { "$ref": "#/entities/StaffDirectoryRecord" },
+      "description": "Independent staff database collection storing hashed staff credentials, roles, and branch assignments."
+    },
+    "/userActivityLogs/{logId}": {
+      "schema": { "$ref": "#/entities/UserActivityLog" },
+      "description": "Stores real-time chronological user activity logs across all ERP dashboards."
+    },
+    "/userSessionMonitors/{userId}": {
+      "schema": { "$ref": "#/entities/UserSessionMonitorRecord" },
+      "description": "Stores live user login, active session, latest activity, and device telemetry per user."
+    },
+    "/erpUnifiedState/{stateKey}": {
+      "schema": { "$ref": "#/entities/UnifiedStateDocument" },
+      "description": "Stores unified ERP state across all system modules and database collections."
+    },
+    "/unifiedStateStore/{stateKey}": {
+      "schema": { "$ref": "#/entities/UnifiedStateDocument" },
+      "description": "Authoritative central cloud store for unified ERP master and operational state across all browsers and devices."
+    },
+    "/mpesaTransactions/{checkoutRequestId}": {
+      "schema": { "$ref": "#/entities/MpesaTransactionRecord" },
+      "description": "Stores authoritative Safaricom Daraja STK Push and C2B payment transactions with immutable callback records."
+    }
+  }
+}

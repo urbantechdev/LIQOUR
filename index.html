@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script>
+      (function () {
+        function isExtConnErr(val) {
+          var s = typeof val === 'string' ? val : (val && (val.message || val.stack || String(val))) || '';
+          return typeof s === 'string' && (
+            s.indexOf('Could not establish connection') !== -1 ||
+            s.indexOf('Receiving end does not exist') !== -1 ||
+            s.indexOf('chrome.runtime.sendMessage') !== -1 ||
+            s.indexOf('sendMessage timed out') !== -1 ||
+            s.indexOf('Extension context invalidated') !== -1 ||
+            s.indexOf('message port closed') !== -1 ||
+            s.indexOf('chrome-extension://') !== -1 ||
+            s.indexOf('WebSocket closed without opened') !== -1 ||
+            s.indexOf('failed to connect to websocket') !== -1 ||
+            s.indexOf('vite-pwa-plugin:dev-ready') !== -1
+          );
+        }
+        window.addEventListener('unhandledrejection', function (event) {
+          if (event && isExtConnErr(event.reason)) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          }
+        }, true);
+        window.addEventListener('error', function (event) {
+          if (
+            event && (
+              isExtConnErr(event.message) ||
+              isExtConnErr(event.error) ||
+              isExtConnErr(event.filename)
+            )
+          ) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+        var origOnError = window.onerror;
+        window.onerror = function (msg, url, line, col, error) {
+          if (isExtConnErr(msg) || isExtConnErr(url) || isExtConnErr(error)) {
+            return true;
+          }
+          if (typeof origOnError === 'function') {
+            return origOnError.apply(this, arguments);
+          }
+          return false;
+        };
+        var origConsoleError = console.error;
+        console.error = function () {
+          for (var i = 0; i < arguments.length; i++) {
+            if (isExtConnErr(arguments[i])) return;
+          }
+          return origConsoleError.apply(console, arguments);
+        };
+      })();
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0A006E" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="VAAIRO ERP" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <title>VAAIRO LIQUOR HUB — Direct Company Price Alcohol &amp; Drinks Delivery</title>
+    <meta name="description" content="Order authentic spirits, whisky, cognac, gin, wine, and beer online at Direct Company Price from VAAIRO LIQUOR HUB with doorstep delivery and M-Pesa payment." />
+    <meta property="og:site_name" content="VAAIRO LIQUOR HUB" />
+    <meta property="og:title" content="VAAIRO LIQUOR HUB — Direct Company Price Alcohol &amp; Drinks Delivery" />
+    <meta property="og:description" content="Order authentic spirits, whisky, cognac, gin, wine, and beer online at Direct Company Price from VAAIRO LIQUOR HUB with doorstep delivery and M-Pesa payment." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="VAAIRO LIQUOR HUB — Direct Company Price Alcohol &amp; Drinks Delivery" />
+    <meta name="twitter:description" content="Order authentic spirits, whisky, cognac, gin, wine, and beer online at Direct Company Price from VAAIRO LIQUOR HUB with doorstep delivery and M-Pesa payment." />
+    <link rel="alternate" type="application/rss+xml" title="VAAIRO LIQUOR HUB — Google Merchant Center XML Feed" href="/feeds/google-shopping.xml" />
+    <script id="vaairo-seo-jsonld" type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "LiquorStore",
+        "name": "VAAIRO LIQUOR HUB",
+        "priceRange": "KES",
+        "description": "Direct Company Price online liquor store and doorstep delivery portal synced with VAAIRO ERP inventory."
+      }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900;1,600;1,900&family=Raleway:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400;1,600&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-[#F0F2F0] text-slate-900 font-sans antialiased selection:bg-[#FFDE00] selection:text-[#0A006E]">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
