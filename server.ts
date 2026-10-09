@@ -53,7 +53,7 @@ export const erpEngine = new AuthoritativeErpEngine(
   { enableDiskPersistence: true }
 );
 
-let liveActiveBranchId: string = 'branch-wh-01';
+let liveActiveBranchId: string = 'branch-hq-main';
 let lastFeedRefreshIso: string = new Date().toISOString();
 let nextScheduledRefreshIso: string = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 let cachedXmlFeed: string = '';
@@ -510,10 +510,7 @@ async function startServer() {
     const targetOrg = String(organizationId || 'org-merchant-vaairo-hq');
 
     const builtInSuperAdmins = [
-      'moraasdorcah@gmail.com',
-      'muyamoz@gmail.com',
-      'support@urbantechdev.com',
-      'admin@vaairo.co.ke',
+      'gduniversalstudio@gmail.com',
       ...(process.env.ADMIN_EMAILS || '')
         .split(',')
         .map(e => e.trim().toLowerCase())
