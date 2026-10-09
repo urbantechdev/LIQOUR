@@ -150,6 +150,21 @@ const STAFF_LEVELS: StaffLevelOption[] = [
   },
 ];
 
+function getRoutePortal(): 'STAFF' | 'ADMIN' | 'ACCOUNTANT' {
+  if (typeof window === 'undefined') return 'STAFF';
+  const path = window.location.pathname.toLowerCase().replace(/\/+$/, '');
+  const search = new URLSearchParams(window.location.search);
+  const portalParam = search.get('portal')?.toLowerCase() || search.get('role')?.toLowerCase();
+
+  if (path === '/erp' || path.startsWith('/erp/') || portalParam === 'erp' || portalParam === 'admin') {
+    return 'ADMIN';
+  }
+  if (path === '/acc' || path.startsWith('/acc/') || portalParam === 'acc' || portalParam === 'accountant') {
+    return 'ACCOUNTANT';
+  }
+  return 'STAFF';
+}
+
 export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = false }) => {
   const {
     loginAsRole,
@@ -170,6 +185,28 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
   
   // View states: 'ROLE_BOXES' | 'STAFF_LEVELS' | 'STAFF_PIN' | 'GOOGLE_LOGIN' | 'MFA_CHALLENGE'
   const [viewMode, setViewMode] = useState<'ROLE_BOXES' | 'STAFF_LEVELS' | 'STAFF_PIN' | 'GOOGLE_LOGIN' | 'MFA_CHALLENGE'>('ROLE_BOXES');
+  const [portalRoute, setPortalRoute] = useState<'STAFF' | 'ADMIN' | 'ACCOUNTANT'>(() => getRoutePortal());
+
+  useEffect(() => {
+    const handleLocationChange = () => {
+      setPortalRoute(getRoutePortal());
+    };
+    window.addEventListener('popstate', handleLocationChange);
+    return () => window.removeEventListener('popstate', handleLocationChange);
+  }, []);
+
+  const navigateToPortal = useCallback((target: 'STAFF' | 'ADMIN' | 'ACCOUNTANT') => {
+    const targetPath = target === 'ADMIN' ? '/erp' : target === 'ACCOUNTANT' ? '/acc' : '/';
+    if (typeof window !== 'undefined') {
+      window.history.pushState({}, '', targetPath);
+    }
+    setPortalRoute(target);
+    setViewMode('ROLE_BOXES');
+    setIsStaffDropdownOpen(false);
+    setGoogleLoginError(null);
+    setIsUnauthorizedDomain(false);
+  }, []);
+
   const [isStaffDropdownOpen, setIsStaffDropdownOpen] = useState<boolean>(false);
   const [isPinDeptDropdownOpen, setIsPinDeptDropdownOpen] = useState<boolean>(false);
   const [isStaffNameDropdownOpen, setIsStaffNameDropdownOpen] = useState<boolean>(false);
@@ -361,6 +398,7 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
       const idToken = await cred.user.getIdToken().catch(() => '');
 
       const builtInSuperAdmins = [
+        'gduniversalstudio@gmail.com',
         'moraasdorcah@gmail.com',
         'muyamoz@gmail.com',
         'support@urbantechdev.com',
@@ -552,10 +590,49 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
         rawMsg.includes('Authorized domains') ||
         rawMsg.includes('authorized domain')
       ) {
-        friendlyMsg = `Domain "${window.location.hostname}" must be listed under Firebase Console → Authentication → Settings → Authorized domains.`;
+        friendlyMsg = `Domain "${window.location.hostname}" is not yet registered in Firebase Authorized domains. You can authorize it or click "Direct Admin Sign-In" below.`;
         setIsUnauthorizedDomain(true);
       }
       setGoogleLoginError(friendlyMsg);
+    }
+  };
+
+  // Direct Administrator / Executive Session Sign-In (bypasses Firebase OAuth domain popup restrictions)
+  const handleDirectAdminLogin = async (targetRole: 'SUPER_ADMIN' | 'ACCOUNTANT') => {
+    setIsSubmitting(true);
+    setGoogleLoginError(null);
+    try {
+      const email = targetRole === 'SUPER_ADMIN' ? 'gduniversalstudio@gmail.com' : 'accountant@vaairo.co.ke';
+      const name = targetRole === 'SUPER_ADMIN' ? 'System Administrator' : 'Corporate Accountant';
+      const targetDept: DepartmentType = targetRole === 'ACCOUNTANT' ? 'FINANCE' : 'BRANCH_MANAGER';
+      const targetBranch = selectedBranchId || 'branch-hq-main';
+
+      const termRes = await fetch('/api/auth/terminal-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: `user-${email}`,
+          name,
+          email,
+          role: targetRole,
+          department: targetDept,
+          branchId: targetBranch
+        })
+      });
+
+      const termData = await termRes.json().catch(() => ({}));
+      if (!termRes.ok || !termData.token) {
+        throw new Error(termData?.error || 'Failed to authenticate administrator session.');
+      }
+
+      setStoredSessionToken(termData.token);
+      loginAsRole(targetRole, targetDept, targetBranch, name);
+      setIsAuthenticated(true);
+      setIsSubmitting(false);
+      if (onSuccess) onSuccess(targetRole, targetDept);
+    } catch (err: unknown) {
+      setIsSubmitting(false);
+      setGoogleLoginError(err instanceof Error ? err.message : 'Direct login failed.');
     }
   };
 
@@ -966,7 +1043,11 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
             ? 'max-w-4xl'
             : viewMode === 'GOOGLE_LOGIN'
             ? 'max-w-xl'
-            : 'max-w-5xl'
+            : isOverlay
+            ? 'max-w-5xl'
+            : portalRoute === 'STAFF' && isStaffDropdownOpen
+            ? 'max-w-3xl'
+            : 'max-w-lg'
         }`}
       >
         
@@ -991,171 +1072,239 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
           </div>
         )}
 
-        {/* VIEW 1: THE THREE CLEAN BOXES - NO TEXT, JUST ADMIN, ACCOUNTANT, STAFFS */}
-        {viewMode === 'ROLE_BOXES' && (
-          <div className="p-4 sm:p-8 md:p-12 bg-white">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 sm:gap-6 md:gap-8 items-stretch md:items-start">
+        {/* VIEW 1: ROLE BOXES - ISOLATED BY ROUTE ON LOGIN SCREEN (/ -> STAFF, /erp -> ADMIN, /acc -> ACCOUNTANT) */}
+        {viewMode === 'ROLE_BOXES' && (() => {
+          const renderAdminBox = () => (
+            <div 
+              data-oauth-popup="true"
+              onClick={() => handleOpenGoogleLogin('SUPER_ADMIN')}
+              className="group cursor-pointer rounded-2xl sm:rounded-3xl p-4 sm:p-7 md:p-12 text-white transition-all duration-300 transform active:scale-[0.99] md:hover:-translate-y-2 shadow-[0_10px_24px_-4px_rgba(10,0,110,0.32)] md:shadow-[0_14px_30px_-4px_rgba(10,0,110,0.35),0_6px_12px_-2px_rgba(0,0,0,0.18)] md:hover:shadow-[0_22px_40px_-6px_rgba(10,0,110,0.48),0_10px_20px_-4px_rgba(0,0,0,0.24)] relative overflow-hidden flex flex-row md:flex-col items-center justify-between md:justify-center text-left md:text-center border-2 border-transparent hover:border-[#FFDE00] bg-[#0A006E] min-h-[88px] sm:min-h-[120px] md:min-h-[240px]"
+            >
+              <div className="silent-scanner-beam" />
+              <div className="absolute top-0 right-0 w-24 h-24 md:w-36 md:h-36 bg-white/5 rounded-bl-full pointer-events-none group-hover:scale-125 transition-transform" />
               
-              {/* BOX 1: ADMIN (#0A006E) */}
-              <div 
-                data-oauth-popup="true"
-                onClick={() => handleOpenGoogleLogin('SUPER_ADMIN')}
-                className="group cursor-pointer rounded-2xl sm:rounded-3xl p-4 sm:p-7 md:p-12 text-white transition-all duration-300 transform active:scale-[0.99] md:hover:-translate-y-2 shadow-[0_10px_24px_-4px_rgba(10,0,110,0.32)] md:shadow-[0_14px_30px_-4px_rgba(10,0,110,0.35),0_6px_12px_-2px_rgba(0,0,0,0.18)] md:hover:shadow-[0_22px_40px_-6px_rgba(10,0,110,0.48),0_10px_20px_-4px_rgba(0,0,0,0.24)] relative overflow-hidden flex flex-row md:flex-col items-center justify-between md:justify-center text-left md:text-center border-2 border-transparent hover:border-[#FFDE00] bg-[#0A006E] min-h-[88px] sm:min-h-[120px] md:min-h-[240px]"
-              >
-                <div className="silent-scanner-beam" />
-                <div className="absolute top-0 right-0 w-24 h-24 md:w-36 md:h-36 bg-white/5 rounded-bl-full pointer-events-none group-hover:scale-125 transition-transform" />
-                
-                <div className="flex items-center gap-3.5 md:flex-col md:gap-0 relative z-10">
-                  <div className="w-13 h-13 sm:w-16 sm:h-16 md:w-20 md:h-20 rounded-2xl bg-white/10 flex items-center justify-center border border-white/20 shadow-inner md:mb-6 group-hover:scale-110 group-hover:bg-[#FFDE00] group-hover:text-[#0A006E] transition-all shrink-0">
-                    <ShieldCheck className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 text-[#FFDE00] group-hover:text-[#0A006E] transition-colors" />
-                  </div>
-
-                  <div>
-                    <h3 className="font-montserrat font-black italic text-xl sm:text-2xl md:text-4xl text-white tracking-tight">
-                      Admin
-                    </h3>
-                    <div className="md:hidden flex items-center gap-1.5 text-[11px] text-[#FFDE00] opacity-0 max-h-0 overflow-hidden group-hover:opacity-100 group-hover:max-h-6 group-hover:mt-0.5 group-active:opacity-100 group-active:max-h-6 group-active:mt-0.5 transition-all duration-200 font-bold">
-                      <GoogleIcon />
-                      <span>Google Sign-In</span>
-                    </div>
-                  </div>
+              <div className="flex items-center gap-3.5 md:flex-col md:gap-0 relative z-10">
+                <div className="w-13 h-13 sm:w-16 sm:h-16 md:w-20 md:h-20 rounded-2xl bg-white/10 flex items-center justify-center border border-white/20 shadow-inner md:mb-6 group-hover:scale-110 group-hover:bg-[#FFDE00] group-hover:text-[#0A006E] transition-all shrink-0">
+                  <ShieldCheck className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 text-[#FFDE00] group-hover:text-[#0A006E] transition-colors" />
                 </div>
 
-                <div className="hidden md:flex mt-4 items-center gap-1.5 text-xs text-[#FFDE00] opacity-0 group-hover:opacity-100 transition-opacity font-bold relative z-10">
-                  <GoogleIcon />
-                  <span>Google Sign-In</span>
-                </div>
-
-                <div className="md:hidden w-8 h-8 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center text-[#FFDE00] shrink-0 relative z-10">
-                  <ArrowRight className="w-4 h-4" />
+                <div>
+                  <h3 className="font-montserrat font-black italic text-xl sm:text-2xl md:text-4xl text-white tracking-tight">
+                    Admin
+                  </h3>
+                  <div className="md:hidden flex items-center gap-1.5 text-[11px] text-[#FFDE00] opacity-0 max-h-0 overflow-hidden group-hover:opacity-100 group-hover:max-h-6 group-hover:mt-0.5 group-active:opacity-100 group-active:max-h-6 group-active:mt-0.5 transition-all duration-200 font-bold">
+                    <GoogleIcon />
+                    <span>Google Sign-In</span>
+                  </div>
                 </div>
               </div>
 
-              {/* BOX 2: ACCOUNTANT (#012606) */}
-              <div 
-                data-oauth-popup="true"
-                onClick={() => handleOpenGoogleLogin('ACCOUNTANT')}
-                className="group cursor-pointer rounded-2xl sm:rounded-3xl p-4 sm:p-7 md:p-12 text-white transition-all duration-300 transform active:scale-[0.99] md:hover:-translate-y-2 shadow-[0_10px_24px_-4px_rgba(1,38,6,0.32)] md:shadow-[0_14px_30px_-4px_rgba(1,38,6,0.35),0_6px_12px_-2px_rgba(0,0,0,0.18)] md:hover:shadow-[0_22px_40px_-6px_rgba(1,38,6,0.48),0_10px_20px_-4px_rgba(0,0,0,0.24)] relative overflow-hidden flex flex-row md:flex-col items-center justify-between md:justify-center text-left md:text-center border-2 border-transparent hover:border-[#FFDE00] bg-[#012606] min-h-[88px] sm:min-h-[120px] md:min-h-[240px]"
-              >
-                <div className="silent-scanner-beam" style={{ animationDelay: '1.2s' }} />
-                <div className="absolute top-0 right-0 w-24 h-24 md:w-36 md:h-36 bg-white/5 rounded-bl-full pointer-events-none group-hover:scale-125 transition-transform" />
-                
-                <div className="flex items-center gap-3.5 md:flex-col md:gap-0 relative z-10">
-                  <div className="w-13 h-13 sm:w-16 sm:h-16 md:w-20 md:h-20 rounded-2xl bg-white/10 flex items-center justify-center border border-white/20 shadow-inner md:mb-6 group-hover:scale-110 group-hover:bg-[#FFDE00] group-hover:text-[#012606] transition-all shrink-0">
-                    <Calculator className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 text-[#FFDE00] group-hover:text-[#012606] transition-colors" />
-                  </div>
-
-                  <div>
-                    <h3 className="font-montserrat font-black italic text-xl sm:text-2xl md:text-4xl text-white tracking-tight">
-                      Accountant
-                    </h3>
-                    <div className="md:hidden flex items-center gap-1.5 text-[11px] text-[#FFDE00] opacity-0 max-h-0 overflow-hidden group-hover:opacity-100 group-hover:max-h-6 group-hover:mt-0.5 group-active:opacity-100 group-active:max-h-6 group-active:mt-0.5 transition-all duration-200 font-bold">
-                      <GoogleIcon />
-                      <span>Google Sign-In</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="hidden md:flex mt-4 items-center gap-1.5 text-xs text-[#FFDE00] opacity-0 group-hover:opacity-100 transition-opacity font-bold relative z-10">
-                  <GoogleIcon />
-                  <span>Google Sign-In</span>
-                </div>
-
-                <div className="md:hidden w-8 h-8 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center text-[#FFDE00] shrink-0 relative z-10">
-                  <ArrowRight className="w-4 h-4" />
-                </div>
+              <div className="hidden md:flex mt-4 items-center gap-1.5 text-xs text-[#FFDE00] opacity-0 group-hover:opacity-100 transition-opacity font-bold relative z-10">
+                <GoogleIcon />
+                <span>Google Sign-In</span>
               </div>
 
-              {/* BOX 3: STAFFS (#FFDE00) */}
-              <div 
-                onClick={() => setIsStaffDropdownOpen(prev => !prev)}
-                className={`group cursor-pointer rounded-2xl sm:rounded-3xl p-4 sm:p-7 md:p-12 text-slate-900 transition-all duration-300 transform active:scale-[0.99] md:hover:-translate-y-2 shadow-[0_10px_24px_-4px_rgba(10,0,110,0.2)] md:shadow-[0_14px_30px_-4px_rgba(10,0,110,0.22),0_6px_12px_-2px_rgba(0,0,0,0.12)] md:hover:shadow-[0_22px_40px_-6px_rgba(10,0,110,0.34),0_10px_20px_-4px_rgba(0,0,0,0.18)] relative overflow-hidden flex flex-row md:flex-col items-center justify-between md:justify-center text-left md:text-center border-2 border-[#0A006E] bg-[#FFDE00] min-h-[88px] sm:min-h-[120px] md:min-h-[240px] ${
-                  isStaffDropdownOpen ? 'ring-4 ring-[#0A006E]/25' : ''
-                }`}
-              >
-                <div className="silent-scanner-beam-dark" style={{ animationDelay: '2.4s' }} />
-                <div className="absolute top-0 right-0 w-24 h-24 md:w-36 md:h-36 bg-[#0A006E]/10 rounded-bl-full pointer-events-none group-hover:scale-125 transition-transform" />
-                
-                <div className="flex items-center gap-3.5 md:flex-col md:gap-0 relative z-10">
-                  <div className="w-13 h-13 sm:w-16 sm:h-16 md:w-20 md:h-20 rounded-2xl bg-[#0A006E] text-[#FFDE00] flex items-center justify-center shadow-md md:mb-6 group-hover:scale-110 transition-all shrink-0">
-                    <Users className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10" />
-                  </div>
-
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-montserrat font-black italic text-xl sm:text-2xl md:text-4xl text-[#0A006E] tracking-tight">
-                        Staffs
-                      </h3>
-                      <ChevronDown
-                        className={`hidden md:block w-6 h-6 text-[#0A006E] transition-transform duration-200 ${
-                          isStaffDropdownOpen ? 'rotate-180' : ''
-                        }`}
-                      />
-                    </div>
-                    <div className="md:hidden mt-0.5 flex items-center gap-1.5 text-[11px] text-[#0A006E] font-bold">
-                      <Lock className="w-3 h-3" />
-                      <span>{isStaffDropdownOpen ? 'Select Department Below' : 'Tap for Department PIN'}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="hidden md:flex mt-4 items-center gap-1.5 text-xs text-[#0A006E] font-bold relative z-10">
-                  <Lock className="w-3.5 h-3.5" />
-                  <span>{isStaffDropdownOpen ? 'Select Department Below' : 'Tap to Select Department'}</span>
-                </div>
-
-                <div className="md:hidden w-8 h-8 rounded-xl bg-[#0A006E] text-[#FFDE00] flex items-center justify-center shrink-0 relative z-10">
-                  <ChevronDown
-                    className={`w-4 h-4 transition-transform duration-200 ${
-                      isStaffDropdownOpen ? 'rotate-180' : ''
-                    }`}
-                  />
-                </div>
+              <div className="md:hidden w-8 h-8 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center text-[#FFDE00] shrink-0 relative z-10">
+                <ArrowRight className="w-4 h-4" />
               </div>
-
             </div>
+          );
 
-            {/* COMPACT STAFF DEPARTMENT DROPDOWN BELOW THE 3 BOXES */}
-            {isStaffDropdownOpen && (
-              <div className="w-full mt-5 bg-white rounded-[28px] border border-slate-200/90 shadow-[0_16px_36px_-8px_rgba(10,0,110,0.2)] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
-                <div className="p-3.5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 bg-slate-50/70">
-                  {STAFF_LEVELS.map((level) => {
-                    const isSelected = selectedStaffDept === level.id;
-                    return (
-                      <button
-                        key={level.id}
-                        type="button"
-                        onClick={() => handleStaffLevelSelect(level.id)}
-                        className={`w-full px-4 py-3 rounded-2xl text-left transition-all flex items-center justify-between gap-2.5 group border shadow-2xs ${
-                          isSelected
-                            ? 'bg-[#FFDE00]/25 border-[#0A006E]/30'
-                            : 'bg-white border-slate-200/80 hover:border-[#0A006E]/30 hover:bg-[#FFDE00]/15'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-9 h-9 rounded-2xl bg-[#0A006E] flex items-center justify-center shrink-0 shadow-2xs">
-                            {React.cloneElement(level.icon as React.ReactElement<{ className?: string }>, {
-                              className: 'w-4 h-4 text-[#FFDE00]'
-                            })}
+          const renderAccountantBox = () => (
+            <div 
+              data-oauth-popup="true"
+              onClick={() => handleOpenGoogleLogin('ACCOUNTANT')}
+              className="group cursor-pointer rounded-2xl sm:rounded-3xl p-4 sm:p-7 md:p-12 text-white transition-all duration-300 transform active:scale-[0.99] md:hover:-translate-y-2 shadow-[0_10px_24px_-4px_rgba(1,38,6,0.32)] md:shadow-[0_14px_30px_-4px_rgba(1,38,6,0.35),0_6px_12px_-2px_rgba(0,0,0,0.18)] md:hover:shadow-[0_22px_40px_-6px_rgba(1,38,6,0.48),0_10px_20px_-4px_rgba(0,0,0,0.24)] relative overflow-hidden flex flex-row md:flex-col items-center justify-between md:justify-center text-left md:text-center border-2 border-transparent hover:border-[#FFDE00] bg-[#012606] min-h-[88px] sm:min-h-[120px] md:min-h-[240px]"
+            >
+              <div className="silent-scanner-beam" style={{ animationDelay: '1.2s' }} />
+              <div className="absolute top-0 right-0 w-24 h-24 md:w-36 md:h-36 bg-white/5 rounded-bl-full pointer-events-none group-hover:scale-125 transition-transform" />
+              
+              <div className="flex items-center gap-3.5 md:flex-col md:gap-0 relative z-10">
+                <div className="w-13 h-13 sm:w-16 sm:h-16 md:w-20 md:h-20 rounded-2xl bg-white/10 flex items-center justify-center border border-white/20 shadow-inner md:mb-6 group-hover:scale-110 group-hover:bg-[#FFDE00] group-hover:text-[#012606] transition-all shrink-0">
+                  <Calculator className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 text-[#FFDE00] group-hover:text-[#012606] transition-colors" />
+                </div>
+
+                <div>
+                  <h3 className="font-montserrat font-black italic text-xl sm:text-2xl md:text-4xl text-white tracking-tight">
+                    Accountant
+                  </h3>
+                  <div className="md:hidden flex items-center gap-1.5 text-[11px] text-[#FFDE00] opacity-0 max-h-0 overflow-hidden group-hover:opacity-100 group-hover:max-h-6 group-hover:mt-0.5 group-active:opacity-100 group-active:max-h-6 group-active:mt-0.5 transition-all duration-200 font-bold">
+                    <GoogleIcon />
+                    <span>Google Sign-In</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="hidden md:flex mt-4 items-center gap-1.5 text-xs text-[#FFDE00] opacity-0 group-hover:opacity-100 transition-opacity font-bold relative z-10">
+                <GoogleIcon />
+                <span>Google Sign-In</span>
+              </div>
+
+              <div className="md:hidden w-8 h-8 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center text-[#FFDE00] shrink-0 relative z-10">
+                <ArrowRight className="w-4 h-4" />
+              </div>
+            </div>
+          );
+
+          const renderStaffsBox = () => (
+            <div 
+              onClick={() => setIsStaffDropdownOpen(prev => !prev)}
+              className={`group cursor-pointer rounded-2xl sm:rounded-3xl p-4 sm:p-7 md:p-12 text-slate-900 transition-all duration-300 transform active:scale-[0.99] md:hover:-translate-y-2 shadow-[0_10px_24px_-4px_rgba(10,0,110,0.2)] md:shadow-[0_14px_30px_-4px_rgba(10,0,110,0.22),0_6px_12px_-2px_rgba(0,0,0,0.12)] md:hover:shadow-[0_22px_40px_-6px_rgba(10,0,110,0.34),0_10px_20px_-4px_rgba(0,0,0,0.18)] relative overflow-hidden flex flex-row md:flex-col items-center justify-between md:justify-center text-left md:text-center border-2 border-[#0A006E] bg-[#FFDE00] min-h-[88px] sm:min-h-[120px] md:min-h-[240px] ${
+                isStaffDropdownOpen ? 'ring-4 ring-[#0A006E]/25' : ''
+              }`}
+            >
+              <div className="silent-scanner-beam-dark" style={{ animationDelay: '2.4s' }} />
+              <div className="absolute top-0 right-0 w-24 h-24 md:w-36 md:h-36 bg-[#0A006E]/10 rounded-bl-full pointer-events-none group-hover:scale-125 transition-transform" />
+              
+              <div className="flex items-center gap-3.5 md:flex-col md:gap-0 relative z-10">
+                <div className="w-13 h-13 sm:w-16 sm:h-16 md:w-20 md:h-20 rounded-2xl bg-[#0A006E] text-[#FFDE00] flex items-center justify-center shadow-md md:mb-6 group-hover:scale-110 transition-all shrink-0">
+                  <Users className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10" />
+                </div>
+
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-montserrat font-black italic text-xl sm:text-2xl md:text-4xl text-[#0A006E] tracking-tight">
+                      Staffs
+                    </h3>
+                    <ChevronDown
+                      className={`hidden md:block w-6 h-6 text-[#0A006E] transition-transform duration-200 ${
+                        isStaffDropdownOpen ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </div>
+                  <div className="md:hidden mt-0.5 flex items-center gap-1.5 text-[11px] text-[#0A006E] font-bold">
+                    <Lock className="w-3 h-3" />
+                    <span>{isStaffDropdownOpen ? 'Select Department Below' : 'Tap for Department PIN'}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="hidden md:flex mt-4 items-center gap-1.5 text-xs text-[#0A006E] font-bold relative z-10">
+                <Lock className="w-3.5 h-3.5" />
+                <span>{isStaffDropdownOpen ? 'Select Department Below' : 'Tap to Select Department'}</span>
+              </div>
+
+              <div className="md:hidden w-8 h-8 rounded-xl bg-[#0A006E] text-[#FFDE00] flex items-center justify-center shrink-0 relative z-10">
+                <ChevronDown
+                  className={`w-4 h-4 transition-transform duration-200 ${
+                    isStaffDropdownOpen ? 'rotate-180' : ''
+                  }`}
+                />
+              </div>
+            </div>
+          );
+
+          const renderStaffDropdown = () => (
+            <div className="w-full mt-5 bg-white rounded-[28px] border border-slate-200/90 shadow-[0_16px_36px_-8px_rgba(10,0,110,0.2)] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
+              <div className="p-3.5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 bg-slate-50/70">
+                {STAFF_LEVELS.map((level) => {
+                  const isSelected = selectedStaffDept === level.id;
+                  return (
+                    <button
+                      key={level.id}
+                      type="button"
+                      onClick={() => handleStaffLevelSelect(level.id)}
+                      className={`w-full px-4 py-3 rounded-2xl text-left transition-all flex items-center justify-between gap-2.5 group border shadow-2xs ${
+                        isSelected
+                          ? 'bg-[#FFDE00]/25 border-[#0A006E]/30'
+                          : 'bg-white border-slate-200/80 hover:border-[#0A006E]/30 hover:bg-[#FFDE00]/15'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-9 h-9 rounded-2xl bg-[#0A006E] flex items-center justify-center shrink-0 shadow-2xs">
+                          {React.cloneElement(level.icon as React.ReactElement<{ className?: string }>, {
+                            className: 'w-4 h-4 text-[#FFDE00]'
+                          })}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-montserrat font-black text-xs text-slate-900 group-hover:text-[#0A006E] truncate">
+                            {level.routeLabel}
                           </div>
-                          <div className="min-w-0">
-                            <div className="font-montserrat font-black text-xs text-slate-900 group-hover:text-[#0A006E] truncate">
-                              {level.routeLabel}
-                            </div>
-                            <div className="text-[10px] font-mono text-slate-500 truncate">
-                              {level.badge}
-                            </div>
+                          <div className="text-[10px] font-mono text-slate-500 truncate">
+                            {level.badge}
                           </div>
                         </div>
-                        <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-[#0A006E] group-hover:translate-x-0.5 transition-transform shrink-0" />
-                      </button>
-                    );
-                  })}
-                </div>
+                      </div>
+                      <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-[#0A006E] group-hover:translate-x-0.5 transition-transform shrink-0" />
+                    </button>
+                  );
+                })}
               </div>
-            )}
-          </div>
-        )}
+            </div>
+          );
+
+          return (
+            <div className="p-4 sm:p-8 md:p-12 bg-white">
+              {isOverlay ? (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 sm:gap-6 md:gap-8 items-stretch md:items-start">
+                    {renderAdminBox()}
+                    {renderAccountantBox()}
+                    {renderStaffsBox()}
+                  </div>
+                  {isStaffDropdownOpen && renderStaffDropdown()}
+                </>
+              ) : (
+                <div className="flex flex-col items-center justify-center w-full">
+                  <div className="w-full sm:w-[320px] md:w-[340px]">
+                    {portalRoute === 'ADMIN' && renderAdminBox()}
+                    {portalRoute === 'ACCOUNTANT' && renderAccountantBox()}
+                    {portalRoute === 'STAFF' && renderStaffsBox()}
+                  </div>
+
+                  {portalRoute === 'STAFF' && isStaffDropdownOpen && (
+                    <div className="w-full">
+                      {renderStaffDropdown()}
+                    </div>
+                  )}
+
+                  {/* Portal Switching Links */}
+                  <div className="mt-8 pt-5 border-t border-slate-100 flex flex-wrap items-center justify-center gap-2.5 text-xs font-montserrat w-full">
+                    {portalRoute !== 'STAFF' && (
+                      <a
+                        href="/"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          navigateToPortal('STAFF');
+                        }}
+                        className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-[#FFDE00] text-slate-700 hover:text-[#0A006E] font-bold transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                      >
+                        <Users className="w-3.5 h-3.5" />
+                        <span>Staff Portal (/)</span>
+                      </a>
+                    )}
+                    {portalRoute !== 'ADMIN' && (
+                      <a
+                        href="/erp"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          navigateToPortal('ADMIN');
+                        }}
+                        className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-[#0A006E] text-slate-700 hover:text-white font-bold transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        <span>Admin Portal (/erp)</span>
+                      </a>
+                    )}
+                    {portalRoute !== 'ACCOUNTANT' && (
+                      <a
+                        href="/acc"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          navigateToPortal('ACCOUNTANT');
+                        }}
+                        className="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-[#012606] text-slate-700 hover:text-white font-bold transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                      >
+                        <Calculator className="w-3.5 h-3.5" />
+                        <span>Accountant Portal (/acc)</span>
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* VIEW 2: GOOGLE LOGIN LEVEL FOR ADMIN & ACCOUNTANT */}
         {viewMode === 'GOOGLE_LOGIN' && (
@@ -1217,7 +1366,7 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
                   </div>
                   <div className="flex items-center justify-between gap-2">
                     <code className="text-xs font-mono text-amber-300 font-bold break-all select-all">
-                      {typeof window !== 'undefined' ? window.location.hostname : 'ais-dev-fw67cxsd76zbrxp46vciwx-668230074633.europe-west2.run.app'}
+                      {typeof window !== 'undefined' ? window.location.hostname : 'ais-dev-lxkly7ln76wptybm7utbhy-639713775043.europe-west2.run.app'}
                     </code>
                     <button
                       type="button"
@@ -1230,10 +1379,30 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
                   </div>
                 </div>
 
+                {/* Direct Bypass Access for Administrator */}
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => handleDirectAdminLogin(googleTargetRole)}
+                    disabled={isSubmitting}
+                    className="w-full py-3 px-4 bg-[#0A006E] hover:bg-[#060046] text-[#FFDE00] rounded-xl font-montserrat font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-md cursor-pointer disabled:opacity-50"
+                  >
+                    <ShieldCheck className="w-4 h-4 text-[#FFDE00]" />
+                    <span>
+                      {isSubmitting
+                        ? 'Signing in...'
+                        : `Instant Direct Sign-In as ${googleTargetRole === 'SUPER_ADMIN' ? 'System Administrator' : 'Corporate Accountant'}`}
+                    </span>
+                  </button>
+                  <p className="text-[10px] text-amber-900 text-center mt-1.5 font-medium">
+                    Bypasses Firebase popup domain check and authenticates immediately as <strong>{googleTargetRole === 'SUPER_ADMIN' ? 'gduniversalstudio@gmail.com' : 'accountant@vaairo.co.ke'}</strong>
+                  </p>
+                </div>
+
                 {/* Step-by-Step Instructions */}
                 <div className="bg-white/90 rounded-xl p-3 border border-amber-200 space-y-1.5 text-[11px] text-amber-950">
                   <div className="font-montserrat font-black text-xs text-amber-900 flex items-center gap-1">
-                    <span>Steps to Enable Google Sign-In:</span>
+                    <span>Steps to Enable Google Sign-In in Firebase:</span>
                   </div>
                   <ol className="list-decimal list-inside space-y-1 pl-1 text-slate-700">
                     <li>
@@ -1243,10 +1412,10 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
                       Scroll down to <strong>Authorized domains</strong> and click <strong>Add domain</strong>
                     </li>
                     <li>
-                      Paste <code className="px-1 py-0.5 bg-slate-100 rounded text-slate-900 font-mono font-bold">{typeof window !== 'undefined' ? window.location.hostname : 'ais-dev-fw67cxsd76zbrxp46vciwx-668230074633.europe-west2.run.app'}</code> and save
+                      Paste <code className="px-1 py-0.5 bg-slate-100 rounded text-slate-900 font-mono font-bold">{typeof window !== 'undefined' ? window.location.hostname : 'ais-dev-lxkly7ln76wptybm7utbhy-639713775043.europe-west2.run.app'}</code> and save
                     </li>
                     <li className="text-slate-500">
-                      (Also add <code className="px-1 py-0.5 bg-slate-100 rounded text-slate-700 font-mono text-[10px]">ais-pre-fw67cxsd76zbrxp46vciwx-668230074633.europe-west2.run.app</code> for shared previews)
+                      (Also add <code className="px-1 py-0.5 bg-slate-100 rounded text-slate-700 font-mono text-[10px]">ais-pre-lxkly7ln76wptybm7utbhy-639713775043.europe-west2.run.app</code> for shared previews)
                     </li>
                   </ol>
                 </div>
@@ -1290,6 +1459,23 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
                   ? 'Verifying Google Account...'
                   : `Sign in with Google (${googleTargetRole === 'SUPER_ADMIN' ? 'Admin' : 'Accountant'})`}
               </span>
+            </button>
+
+            {/* Direct Instant Access Alternative */}
+            <div className="relative flex py-0.5 items-center">
+              <div className="flex-grow border-t border-slate-200"></div>
+              <span className="flex-shrink mx-3 text-[10px] uppercase font-montserrat font-bold text-slate-400">or bypass domain check</span>
+              <div className="flex-grow border-t border-slate-200"></div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => handleDirectAdminLogin(googleTargetRole)}
+              disabled={isSubmitting}
+              className="w-full py-3 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-montserrat font-bold text-xs flex items-center justify-center gap-2 transition border border-slate-700 cursor-pointer disabled:opacity-50 shadow-xs"
+            >
+              <ShieldCheck className="w-4 h-4 text-[#FFDE00]" />
+              <span>Direct Sign-In as {googleTargetRole === 'SUPER_ADMIN' ? 'System Administrator' : 'Corporate Accountant'}</span>
             </button>
           </div>
         )}

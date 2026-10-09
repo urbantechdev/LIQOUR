@@ -23,7 +23,8 @@ import {
   HeldCart,
   PayrollRecord,
   SaleOrder,
-  SalesRepOffDutyRequest
+  SalesRepOffDutyRequest,
+  StaffEmploymentStatus
 } from '../types';
 import {
   generateCryptographicSalt,
@@ -85,6 +86,11 @@ export interface StaffDirectoryRecord {
   preferredPricesJson?: string;
   staffDataJson?: string;
   active: boolean;
+  employmentStatus?: StaffEmploymentStatus;
+  suspendedAt?: string;
+  suspensionReason?: string;
+  terminatedAt?: string;
+  terminationReason?: string;
   lastLoginAt?: string;
   loginCount?: number;
   updatedAt: string;
@@ -92,11 +98,35 @@ export interface StaffDirectoryRecord {
 
 const INDEPENDENT_STAFF_LOCAL_KEY = 'vaairo_independent_staff_db_v1_records';
 const INDEPENDENT_STAFF_DATA_KEY = 'vaairo_independent_staff_db_v1_snapshots';
+const DELETED_STAFF_IDS_KEY = 'vaairo_deleted_staff_ids_v1';
 const IDB_NAME = 'VaairoIndependentStaffDB';
 const IDB_VERSION = 1;
 const IDB_STORE_RECORDS = 'staff_directory';
 const IDB_STORE_DATA = 'staff_workspace_data';
 const FIRESTORE_COLLECTION = 'staffDirectory';
+
+export function getDeletedStaffIdsSet(): Set<string> {
+  try {
+    if (typeof localStorage === 'undefined') return new Set();
+    const raw = localStorage.getItem(DELETED_STAFF_IDS_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function markStaffIdDeletedLocally(staffId: string): void {
+  try {
+    if (typeof localStorage === 'undefined' || !staffId) return;
+    const current = getDeletedStaffIdsSet();
+    current.add(staffId);
+    localStorage.setItem(DELETED_STAFF_IDS_KEY, JSON.stringify(Array.from(current)));
+  } catch (e) {
+    console.warn('Failed to mark staff as deleted locally:', e);
+  }
+}
 
 function sanitizeSixDigitPin(pin?: string): string {
   const digits = (pin || '').replace(/\D/g, '').slice(0, 6);
@@ -781,6 +811,11 @@ export function employeeToStaffDirectoryRecord(
     bankAccount: emp.bankAccount || '018000000000',
     staffDataJson: serializeStaffPersonalData(personalData),
     active: emp.active ?? true,
+    employmentStatus: emp.employmentStatus,
+    suspendedAt: emp.suspendedAt,
+    suspensionReason: emp.suspensionReason,
+    terminatedAt: emp.terminatedAt,
+    terminationReason: emp.terminationReason,
     lastLoginAt: existingMeta?.lastLoginAt,
     loginCount: existingMeta?.loginCount ?? 0,
     updatedAt: new Date().toISOString()
@@ -849,6 +884,11 @@ export function affiliateToStaffDirectoryRecord(
     preferredPricesJson,
     staffDataJson: serializeStaffPersonalData(personalData),
     active: aff.active ?? true,
+    employmentStatus: aff.employmentStatus,
+    suspendedAt: aff.suspendedAt,
+    suspensionReason: aff.suspensionReason,
+    terminatedAt: aff.terminatedAt,
+    terminationReason: aff.terminationReason,
     lastLoginAt: existingMeta?.lastLoginAt,
     loginCount: existingMeta?.loginCount ?? 0,
     updatedAt: new Date().toISOString()
@@ -882,7 +922,12 @@ export function staffDirectoryRecordToEmployee(rec: StaffDirectoryRecord): Emplo
     bankName: rec.bankName || 'Equity Bank Kenya',
     bankAccount: rec.bankAccount || '',
     mPesaNumber: rec.phone || '',
-    active: rec.active ?? true
+    active: rec.active ?? true,
+    employmentStatus: rec.employmentStatus,
+    suspendedAt: rec.suspendedAt,
+    suspensionReason: rec.suspensionReason,
+    terminatedAt: rec.terminatedAt,
+    terminationReason: rec.terminationReason
   };
 }
 
@@ -922,7 +967,12 @@ export function staffDirectoryRecordToAffiliate(rec: StaffDirectoryRecord): Affi
     paidCommissionKes: rec.paidCommissionKes ?? 0,
     pendingCommissionKes: rec.pendingCommissionKes ?? 0,
     mpesaNumber: rec.phone || '',
-    active: rec.active ?? true
+    active: rec.active ?? true,
+    employmentStatus: rec.employmentStatus,
+    suspendedAt: rec.suspendedAt,
+    suspensionReason: rec.suspensionReason,
+    terminatedAt: rec.terminatedAt,
+    terminationReason: rec.terminationReason
   };
 }
 
@@ -931,22 +981,29 @@ export function staffDirectoryRecordToAffiliate(rec: StaffDirectoryRecord): Affi
 // ============================================================================
 export async function upsertStaffRecordAcrossAllTiers(
   record: StaffDirectoryRecord,
-  personalData?: StaffPersonalDataPayload
-): Promise<void> {
-  const existing = loadLocalIndependentStaffRecords();
-  const next = existing.some(r => r.id === record.id)
-    ? existing.map(r => (r.id === record.id ? record : r))
-    : [record, ...existing];
-  saveLocalIndependentStaffRecords(next);
+  personalData?: StaffPersonalDataPayload,
+  _requireCentralConfirmation?: boolean
+): Promise<boolean> {
+  try {
+    const existing = loadLocalIndependentStaffRecords();
+    const next = existing.some(r => r.id === record.id)
+      ? existing.map(r => (r.id === record.id ? record : r))
+      : [record, ...existing];
+    saveLocalIndependentStaffRecords(next);
 
-  if (personalData) {
-    const snaps = loadLocalStaffDataSnapshots();
-    snaps[record.id] = personalData;
-    saveLocalStaffDataSnapshots(snaps);
+    if (personalData) {
+      const snaps = loadLocalStaffDataSnapshots();
+      snaps[record.id] = personalData;
+      saveLocalStaffDataSnapshots(snaps);
+    }
+
+    await writeRecordToStaffIndexedDb(record, personalData);
+    await pushStaffRecordToFirestore(record);
+    return true;
+  } catch (err) {
+    console.warn('upsertStaffRecordAcrossAllTiers error:', err);
+    return false;
   }
-
-  await writeRecordToStaffIndexedDb(record, personalData);
-  await pushStaffRecordToFirestore(record);
 }
 
 export function findStaffByPinInstant(

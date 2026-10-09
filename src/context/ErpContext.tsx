@@ -4510,9 +4510,10 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = [...prev];
       const nowIso = new Date().toISOString();
 
+      const targetMainBranchId = branches.find(b => b.tier === 'MAIN_STORE')?.id || branches[0]?.id || 'branch-hq-main';
       targetCatalog.forEach((p, idx) => {
-        // 1. Warehouse Stock (branch-wh-01)
-        const whIdx = updated.findIndex(i => i.productId === p.id && i.branchId === 'branch-wh-01');
+        // 1. Warehouse Stock
+        const whIdx = updated.findIndex(i => i.productId === p.id && i.branchId === targetMainBranchId);
         if (whIdx >= 0) {
           if (updated[whIdx].bottlesOnHand === 0 && whCases > 0) {
             updated[whIdx] = {
@@ -4527,7 +4528,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           updated.push({
             id: `inv-wh-${p.id}-${Date.now()}`,
             productId: p.id,
-            branchId: 'branch-wh-01',
+            branchId: targetMainBranchId,
             casesOnHand: whCases,
             bottlesOnHand: whCases * p.packSize,
             reorderLevel: p.packSize * 3,
@@ -4538,8 +4539,8 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           updatedStockCount++;
         }
 
-        // 2. Retail Shop Stock (branch-ls-01 or activeBranch)
-        const targetShopId = activeBranch.tier === 'LIQUOR_STORE' ? activeBranch.id : 'branch-ls-01';
+        // 2. Retail Shop Stock
+        const targetShopId = activeBranch.id;
         const lsIdx = updated.findIndex(i => i.productId === p.id && i.branchId === targetShopId);
         if (lsIdx >= 0) {
           if (updated[lsIdx].bottlesOnHand === 0 && lsCases > 0) {

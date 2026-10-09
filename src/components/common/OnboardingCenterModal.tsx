@@ -94,7 +94,7 @@ export const OnboardingCenterModal: React.FC<Props> = ({ initialTab = 'SUPPLIER'
   const [empLoginPin, setEmpLoginPin] = useState('');
   const [empTitle, setEmpTitle] = useState('POS Cashier (Casual • Commission)');
   const [empDept, setEmpDept] = useState<DepartmentType>('POS');
-  const [empBranchId, setEmpBranchId] = useState(branches[0]?.id || 'branch-wh-01');
+  const [empBranchId, setEmpBranchId] = useState(branches[0]?.id || 'branch-hq-main');
   const [empAssignedCashierId, setEmpAssignedCashierId] = useState<string>('');
   const posCashiers = employees.filter(e => e.department === 'POS' && e.active);
   const isCasualStaffDept = empDept === 'POS' || empDept === 'AFFILIATES';

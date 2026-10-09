@@ -353,8 +353,8 @@ export const Header: React.FC<Props> = ({ activeTab = 'DASHBOARD', onSelectTab, 
 
           {/* Right: Desktop User Profile & Role Actions (Hidden on Mobile, Right-Aligned on Desktop) */}
           <div className="hidden lg:flex lg:w-auto items-center justify-end gap-2.5 sm:gap-3">
-            {/* In-App PWA Install Button (Windows 11 Icon) */}
-            {!isStaffPos && <PWAInstallButton />}
+            {/* In-App PWA Install Button (Windows 11 Icon) - Hidden on login screen */}
+            {isAuthenticated && !isStaffPos && <PWAInstallButton />}
 
             {/* Direct User-Facing Customer Website Portal Icon Button (https://liqour.urbantechdev.com/website) */}
             {onOpenStorefront && !isStaffPos && (
@@ -1601,8 +1601,8 @@ export const Header: React.FC<Props> = ({ activeTab = 'DASHBOARD', onSelectTab, 
                   )}
                 </div>
 
-                {/* PWA Install Row */}
-                {!isStaffPos && (
+                {/* PWA Install Row - Hidden on login screen */}
+                {isAuthenticated && !isStaffPos && (
                   <div className="pt-1">
                     <PWAInstallButton variant="menu" />
                   </div>

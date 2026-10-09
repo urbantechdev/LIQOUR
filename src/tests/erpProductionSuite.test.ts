@@ -121,6 +121,35 @@ async function runProductionErpTests(): Promise<void> {
     enableDiskPersistence: false
   });
 
+  // Test Fixtures for Isolated Test Run
+  engine.registerOrUpdateStaffPin({
+    staffId: 'emp-pos-01',
+    name: 'Kevin Otieno',
+    codeOrNumber: 'EMP-101',
+    role: 'CASHIER',
+    department: 'POS',
+    branchId: 'branch-1',
+    rawPin: '123456'
+  });
+  engine.registerOrUpdateStaffPin({
+    staffId: 'emp-mgr-01',
+    name: 'Grace Wanjiku',
+    codeOrNumber: 'EMP-102',
+    role: 'MANAGER',
+    department: 'BRANCH_MANAGER',
+    branchId: 'branch-1',
+    rawPin: '234567'
+  });
+  engine.registerOrUpdateStaffPin({
+    staffId: 'emp-inv-01',
+    name: 'Daniel Kiprop',
+    codeOrNumber: 'EMP-103',
+    role: 'INVENTORY_STAFF',
+    department: 'INVENTORY',
+    branchId: 'branch-wh-01',
+    rawPin: '345678'
+  });
+
   // ---------------------------------------------------------------------------
   // 1. AUTHENTICATION, SALTED PIN HASHING & BRUTE-FORCE LOCKOUT TESTS
   // ---------------------------------------------------------------------------
@@ -1273,6 +1302,16 @@ async function runProductionErpTests(): Promise<void> {
   assert.equal(unprovisionedDomainCheck.authorized, false);
   assert.equal(unprovisionedDomainCheck.status, 403);
   assert.equal(unprovisionedDomainCheck.errorCode, 'ONBOARDING_MEMBERSHIP_REQUIRED');
+
+  // Register finance test membership for isolated test
+  engine.registerOrganizationMembership({
+    userId: 'user-finance@vaairo.co.ke',
+    email: 'finance@vaairo.co.ke',
+    organizationId: 'org-merchant-vaairo-hq',
+    role: 'ACCOUNTANT',
+    department: 'FINANCE',
+    active: true
+  });
 
   // Seeded finance principal must derive ACCOUNTANT role from server-side membership
   const financeMembershipCheck = engine.resolveGoogleIdentityMembership({

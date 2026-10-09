@@ -48,33 +48,13 @@ export const INITIAL_PRODUCTS: Product[] = [];
 
 export const INITIAL_USERS: User[] = [
   {
-    id: 'usr-01',
+    id: 'user-admin',
     name: 'System Administrator',
-    email: 'support@urbantechdev.com',
-    role: 'SUPER_ADMIN',
-    department: 'FINANCE',
-    branchId: '',
-    phone: '+254700000000',
-    mfaEnabled: true
-  },
-  {
-    id: 'user-moraasdorcah@gmail.com',
-    name: 'Moraa Dorcah (Super Admin)',
-    email: 'moraasdorcah@gmail.com',
+    email: 'gduniversalstudio@gmail.com',
     role: 'SUPER_ADMIN',
     department: 'BRANCH_MANAGER',
-    branchId: '',
-    phone: '+254700000001',
-    mfaEnabled: true
-  },
-  {
-    id: 'user-muyamoz@gmail.com',
-    name: 'Muya Moz (Super Admin)',
-    email: 'muyamoz@gmail.com',
-    role: 'SUPER_ADMIN',
-    department: 'BRANCH_MANAGER',
-    branchId: '',
-    phone: '+254700000002',
+    branchId: 'branch-hq-main',
+    phone: '',
     mfaEnabled: true
   }
 ];

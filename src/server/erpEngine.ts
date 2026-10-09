@@ -755,10 +755,7 @@ export class AuthoritativeErpEngine {
 
     // Ensure whitelisted super-admin emails and any explicitly configured ADMIN_EMAILS from env have a server-controlled membership record
     const builtInSuperAdmins = [
-      'moraasdorcah@gmail.com',
-      'muyamoz@gmail.com',
-      'support@urbantechdev.com',
-      'admin@vaairo.co.ke'
+      'gduniversalstudio@gmail.com'
     ];
     const envAdminEmails = [
       ...builtInSuperAdmins,
@@ -921,33 +918,6 @@ export class AuthoritativeErpEngine {
       branchId: string;
       defaultPin: string;
     }> = [
-      {
-        staffId: 'emp-pos-01',
-        name: 'Kevin Otieno (Counter Cashier)',
-        code: 'EMP-101',
-        role: 'CASHIER',
-        department: 'POS',
-        branchId: 'branch-1',
-        defaultPin: '123456'
-      },
-      {
-        staffId: 'emp-mgr-01',
-        name: 'Grace Wanjiku (Branch Manager)',
-        code: 'EMP-102',
-        role: 'MANAGER',
-        department: 'BRANCH_MANAGER',
-        branchId: 'branch-1',
-        defaultPin: '234567'
-      },
-      {
-        staffId: 'emp-inv-01',
-        name: 'Daniel Kiprop (Inventory Controller)',
-        code: 'EMP-103',
-        role: 'INVENTORY_STAFF',
-        department: 'INVENTORY',
-        branchId: 'branch-wh-01',
-        defaultPin: '345678'
-      },
       ...INITIAL_EMPLOYEES.map(emp => ({
         staffId: emp.id,
         name: emp.name,
@@ -1014,34 +984,10 @@ export class AuthoritativeErpEngine {
       branchId?: string;
     }> = [
       {
-        userId: 'user-moraasdorcah@gmail.com',
-        email: 'moraasdorcah@gmail.com',
+        userId: 'user-gduniversalstudio@gmail.com',
+        email: 'gduniversalstudio@gmail.com',
         role: 'SUPER_ADMIN',
         department: 'BRANCH_MANAGER'
-      },
-      {
-        userId: 'user-muyamoz@gmail.com',
-        email: 'muyamoz@gmail.com',
-        role: 'SUPER_ADMIN',
-        department: 'BRANCH_MANAGER'
-      },
-      {
-        userId: 'user-support@urbantechdev.com',
-        email: 'support@urbantechdev.com',
-        role: 'SUPER_ADMIN',
-        department: 'BRANCH_MANAGER'
-      },
-      {
-        userId: 'user-admin@vaairo.co.ke',
-        email: 'admin@vaairo.co.ke',
-        role: 'SUPER_ADMIN',
-        department: 'BRANCH_MANAGER'
-      },
-      {
-        userId: 'user-finance@vaairo.co.ke',
-        email: 'finance@vaairo.co.ke',
-        role: 'ACCOUNTANT',
-        department: 'FINANCE'
       }
     ];
 
@@ -4198,5 +4144,24 @@ export class AuthoritativeErpEngine {
     } catch {
       // Ignore corrupt or missing persistence file
     }
+  }
+
+  public cleanAllSalesData(): { cleanedSalesCount: number; timestamp: string } {
+    const previousCount = this.sales.size;
+    this.sales.clear();
+    this.payments.clear();
+    this.receipts.clear();
+    this.fiscalTransactions.clear();
+    this.documentSequences = {
+      ...this.documentSequences,
+      ORD: 1000,
+      INV: 1000,
+      RCT: 1000
+    };
+    this.saveStateToDisk();
+    return {
+      cleanedSalesCount: previousCount,
+      timestamp: new Date().toISOString()
+    };
   }
 }
