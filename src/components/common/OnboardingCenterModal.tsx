@@ -24,7 +24,8 @@ import {
   Store,
   Warehouse,
   Layers,
-  MapPin
+  MapPin,
+  Trash2
 } from 'lucide-react';
 import { StaffActionButtons, StaffStatusBadge } from './StaffLifecycleActionsModal';
 
@@ -50,7 +51,8 @@ export const OnboardingCenterModal: React.FC<Props> = ({ initialTab = 'SUPPLIER'
     branches,
     addBranch,
     switchBranch,
-    activeBranch
+    activeBranch,
+    wipeAllUsersAndStaff
   } = useErp();
 
   const [activeTab, setActiveTab] = useState<OnboardingTabType>(initialTab);
@@ -58,6 +60,8 @@ export const OnboardingCenterModal: React.FC<Props> = ({ initialTab = 'SUPPLIER'
   const [staffErrorMsg, setStaffErrorMsg] = useState<string | null>(null);
   const [editingPinEmpId, setEditingPinEmpId] = useState<string | null>(null);
   const [editingPinValue, setEditingPinValue] = useState<string>('');
+  const [isWipeConfirmOpen, setIsWipeConfirmOpen] = useState<boolean>(false);
+  const [isWipingUsers, setIsWipingUsers] = useState<boolean>(false);
 
   // 1. Supplier Form State
   const [supName, setSupName] = useState('');
@@ -886,6 +890,24 @@ export const OnboardingCenterModal: React.FC<Props> = ({ initialTab = 'SUPPLIER'
           {/* TAB 3: ONBOARD STAFF */}
           {activeTab === 'STAFF' && (
             <div className="space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
+                <div className="flex items-center gap-2 text-xs font-montserrat font-bold text-slate-700">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                  <span>
+                    Staff Directory: <strong>{employees.length}</strong> Salaried Employees • <strong>{affiliates.length}</strong> Sales Representatives
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsWipeConfirmOpen(true)}
+                  className="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-xl text-xs font-montserrat font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+                  title="Wipe all users & staff so you can create brand new accounts"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                  <span>Wipe All Users</span>
+                </button>
+              </div>
+
               {staffErrorMsg && (
                 <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 text-red-800 text-xs font-bold">
                   {staffErrorMsg}
@@ -1748,6 +1770,65 @@ export const OnboardingCenterModal: React.FC<Props> = ({ initialTab = 'SUPPLIER'
           )}
         </div>
       </div>
+
+      {/* Wipe All Staff & Users Confirmation Modal */}
+      {isWipeConfirmOpen && (
+        <div className="fixed inset-0 z-[10000] bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border-2 border-rose-600 animate-in zoom-in-95">
+            <div className="flex items-center gap-3 text-rose-600 mb-4">
+              <div className="w-12 h-12 rounded-xl bg-rose-100 flex items-center justify-center shrink-0">
+                <Trash2 className="w-6 h-6 text-rose-600" />
+              </div>
+              <div>
+                <h3 className="font-montserrat font-black text-lg text-slate-900">
+                  Wipe All Staff &amp; Users?
+                </h3>
+                <p className="text-xs text-slate-500 font-semibold">
+                  Permanent Database Clean Slate
+                </p>
+              </div>
+            </div>
+
+            <p className="text-sm text-slate-600 mb-6 leading-relaxed">
+              This will erase all existing employee and sales representative accounts across the database and browser storage, allowing you to create brand new staff and credentials from scratch.
+            </p>
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                disabled={isWipingUsers}
+                onClick={() => setIsWipeConfirmOpen(false)}
+                className="px-4 py-2 border border-slate-300 rounded-xl text-slate-700 hover:bg-slate-100 font-bold text-xs transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isWipingUsers}
+                onClick={async () => {
+                  setIsWipingUsers(true);
+                  const ok = await wipeAllUsersAndStaff();
+                  setIsWipingUsers(false);
+                  setIsWipeConfirmOpen(false);
+                  if (ok) {
+                    showToast('✓ All staff & user records wiped cleanly. You can now onboard brand new staff.');
+                  }
+                }}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-montserrat font-black text-xs rounded-xl shadow-lg transition flex items-center gap-2 cursor-pointer"
+              >
+                {isWipingUsers ? (
+                  <span>Wiping...</span>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Yes, Wipe All</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 

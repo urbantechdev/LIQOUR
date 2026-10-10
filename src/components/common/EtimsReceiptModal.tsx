@@ -74,8 +74,24 @@ export const EtimsReceiptModal: React.FC<Props> = ({ invoice, order, onClose }) 
               <span>{invoice.invoiceDate}</span>
             </div>
             <div className="flex justify-between">
-              <span>SERVED BY -</span>
-              <span className="font-bold text-[#0A006E]">{servedByName}</span>
+              <span>CASHIER:</span>
+              <span className="font-bold text-[#0A006E]">{order?.cashierName || servedByName}</span>
+            </div>
+            {(order?.salesPersonName || order?.affiliateName) && (
+              <div className="flex justify-between">
+                <span>SALES REP:</span>
+                <span className="font-bold text-emerald-800">{order.salesPersonName || order.affiliateName}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-[10px] text-slate-500">
+              <span>CHECKOUT TYPE:</span>
+              <span className="font-mono font-bold text-slate-800">
+                {order?.checkoutRole === 'SALES_REP_SELF_CHECKOUT'
+                  ? 'REP DIRECT CASHOUT'
+                  : order?.checkoutRole === 'COUNTER_CASHIER_REP_RECALL'
+                  ? 'COUNTER CASHIER (REP ORDER)'
+                  : 'COUNTER CASHIER (DIRECT SALE)'}
+              </span>
             </div>
             <div className="flex justify-between">
               <span>BUYER PIN:</span>
@@ -84,10 +100,6 @@ export const EtimsReceiptModal: React.FC<Props> = ({ invoice, order, onClose }) 
             <div className="flex justify-between">
               <span>BUYER NAME:</span>
               <span className="truncate max-w-[180px]">{invoice.buyerName}</span>
-            </div>
-            <div className="flex justify-between pt-1 border-t border-dotted border-slate-300 text-slate-900">
-              <span className="font-bold">SERVED BY -</span>
-              <span className="font-montserrat font-black text-[#0A006E]">{servedByName}</span>
             </div>
             {order?.paymentMethod && (
               <div className="flex justify-between">

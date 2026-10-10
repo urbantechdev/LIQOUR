@@ -158,6 +158,9 @@ export interface SaleOrder {
   branchName: string;
   cashierId: string;
   cashierName: string;
+  salesPersonId?: string;
+  salesPersonName?: string;
+  checkoutRole?: 'SALES_REP_SELF_CHECKOUT' | 'COUNTER_CASHIER_DIRECT' | 'COUNTER_CASHIER_REP_RECALL';
   customerName?: string;
   customerEmail?: string;
   customerPhone?: string;

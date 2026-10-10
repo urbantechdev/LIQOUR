@@ -19,7 +19,8 @@ import {
   Clock,
   XCircle,
   Menu,
-  X
+  X,
+  Trash2
 } from 'lucide-react';
 import { OnboardingCenterModal, OnboardingTabType } from '../common/OnboardingCenterModal';
 import { LeaveAndOffDutyModal } from '../common/LeaveAndOffDutyModal';
@@ -44,7 +45,8 @@ export const PayrollManager: React.FC = () => {
     currentRole,
     activeBranch,
     employeeLeaveRequests,
-    reviewEmployeeLeaveRequest
+    reviewEmployeeLeaveRequest,
+    wipeAllUsersAndStaff
   } = useErp();
 
   const isBranchScopedHr = currentRole !== 'SUPER_ADMIN';
@@ -58,6 +60,8 @@ export const PayrollManager: React.FC = () => {
 
   const [selectedMonth, setSelectedMonth] = useState('September 2026');
   const [isHeroMenuOpen, setIsHeroMenuOpen] = useState(false);
+  const [isWipeConfirmOpen, setIsWipeConfirmOpen] = useState(false);
+  const [isWipingUsers, setIsWipingUsers] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
   const [onboardingTab, setOnboardingTab] = useState<OnboardingTabType | null>(null);
   const [isLeaveModalOpen, setIsLeaveModalOpen] = useState<boolean>(false);
@@ -297,6 +301,19 @@ export const PayrollManager: React.FC = () => {
             >
               <UserPlus className="w-4 h-4 text-[#0A006E] shrink-0" />
               <span>Onboard New Staff</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setIsWipeConfirmOpen(true);
+                setIsHeroMenuOpen(false);
+              }}
+              className="px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-xl text-xs font-montserrat font-bold transition shadow-sm flex items-center gap-1.5 cursor-pointer"
+              title="Wipe all users & staff so you can create brand new accounts"
+            >
+              <Trash2 className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>Wipe All Users</span>
             </button>
 
             <button
@@ -1411,6 +1428,66 @@ export const PayrollManager: React.FC = () => {
           mode="EMPLOYEE_LEAVE"
           onClose={() => setIsLeaveModalOpen(false)}
         />
+      )}
+
+      {/* Wipe All Staff & Users Confirmation Modal */}
+      {isWipeConfirmOpen && (
+        <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border-2 border-rose-600 animate-in zoom-in-95">
+            <div className="flex items-center gap-3 text-rose-600 mb-4">
+              <div className="w-12 h-12 rounded-xl bg-rose-100 flex items-center justify-center shrink-0">
+                <Trash2 className="w-6 h-6 text-rose-600" />
+              </div>
+              <div>
+                <h3 className="font-montserrat font-black text-lg text-slate-900">
+                  Wipe All Staff &amp; Users?
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Permanent Database Clean Slate
+                </p>
+              </div>
+            </div>
+
+            <p className="text-sm text-slate-600 mb-6 leading-relaxed">
+              This will erase all existing employee and sales representative accounts across the database and browser storage, allowing you to create brand new staff and credentials from scratch.
+            </p>
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                disabled={isWipingUsers}
+                onClick={() => setIsWipeConfirmOpen(false)}
+                className="px-4 py-2 border border-slate-300 rounded-xl text-slate-700 hover:bg-slate-100 font-bold text-xs transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isWipingUsers}
+                onClick={async () => {
+                  setIsWipingUsers(true);
+                  const ok = await wipeAllUsersAndStaff();
+                  setIsWipingUsers(false);
+                  setIsWipeConfirmOpen(false);
+                  if (ok) {
+                    setSyncFeedback('✓ All staff & user records have been wiped cleanly. You can now onboard new staff.');
+                    setTimeout(() => setSyncFeedback(null), 6000);
+                  }
+                }}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-montserrat font-black text-xs rounded-xl shadow-lg transition flex items-center gap-2"
+              >
+                {isWipingUsers ? (
+                  <span>Wiping...</span>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Yes, Wipe All</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

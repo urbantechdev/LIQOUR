@@ -196,6 +196,9 @@ export interface SaleOrder {
   branchName: string;
   cashierId: string;
   cashierName: string;
+  salesPersonId?: string;
+  salesPersonName?: string;
+  checkoutRole?: 'SALES_REP_SELF_CHECKOUT' | 'COUNTER_CASHIER_DIRECT' | 'COUNTER_CASHIER_REP_RECALL';
   consumerId?: string; // First-class Consumer identity reference
   organizationId?: string; // Fulfilling Organization (Retailer, Distributor, or Merchant)
   buyerOrganizationId?: string; // Buying Organization for B2B wholesale orders

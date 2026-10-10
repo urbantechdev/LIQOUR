@@ -1065,14 +1065,36 @@ export const SalesManagerDashboard: React.FC = () => {
                         {new Date(order.createdAt).toLocaleString()}
                       </td>
                       <td className="py-3 px-4">
-                        {order.affiliateName ? (
-                          <span className="inline-flex items-center gap-1.5 font-montserrat font-bold text-[#0A006E]">
-                            <Award className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                            <span>{order.affiliateName}</span>
-                          </span>
-                        ) : (
-                          <span className="text-slate-600 font-medium">{order.cashierName}</span>
-                        )}
+                        <div className="space-y-0.5">
+                          {order.salesPersonName || order.affiliateName ? (
+                            <div>
+                              <div className="inline-flex items-center gap-1.5 font-montserrat font-bold text-[#0A006E]">
+                                <Award className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                                <span>{order.salesPersonName || order.affiliateName}</span>
+                              </div>
+                              <div className="flex items-center gap-1 mt-0.5">
+                                {order.checkoutRole === 'SALES_REP_SELF_CHECKOUT' ? (
+                                  <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[9px] font-bold">
+                                    Direct Self-Cashout
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-slate-500 font-mono">
+                                    Cashier: <strong className="text-slate-700">{order.cashierName}</strong>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div>
+                              <span className="text-slate-800 font-medium text-xs">
+                                {order.cashierName}
+                              </span>
+                              <div className="text-[9px] text-slate-400 font-mono">
+                                Counter Direct Sale
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </td>
                       <td className="py-3 px-4">
                         <div className="font-bold text-slate-900">

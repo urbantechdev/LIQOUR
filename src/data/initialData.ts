@@ -50,11 +50,11 @@ export const INITIAL_USERS: User[] = [
   {
     id: 'user-admin',
     name: 'System Administrator',
-    email: 'gduniversalstudio@gmail.com',
+    email: 'zamodasports@gmail.com',
     role: 'SUPER_ADMIN',
     department: 'BRANCH_MANAGER',
     branchId: 'branch-hq-main',
-    phone: '',
+    phone: '+254 722 000 000',
     mfaEnabled: true
   }
 ];

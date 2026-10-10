@@ -503,19 +503,54 @@ export const AccountingHub: React.FC = () => {
             </div>
           </div>
 
-          {/* Double-Entry Journal Entries */}
+          {/* Double-Entry Journal Entries & Financial Ledger Audit */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
-            <div className="p-4 border-b border-slate-200">
-              <h3 className="font-montserrat font-black text-sm text-slate-900">
-                Balanced Journal Entries Audit Trail
-              </h3>
-              <p className="text-xs text-slate-500">
-                Auto-posted by POS 16% VAT Invoices, Supply Invoices, B2B Billing, and Payroll sync
-              </p>
+            <div className="p-4 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-50/50">
+              <div>
+                <h3 className="font-montserrat font-black text-sm text-slate-900 flex items-center gap-2">
+                  <span>Balanced Financial Ledger &amp; Journal Entries Audit Trail</span>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                    ✓ Double-Entry Guaranteed
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Strictly balanced debits and credits auto-posted across POS sales, cashouts, supply ingests, and B2B orders
+                </p>
+              </div>
+
+              {/* Total Debits vs Credits Summary Widget */}
+              {(() => {
+                const totalDebits = Math.round(journalEntries.reduce((s, j) => s + (j.totalDebitKes || 0), 0) * 100) / 100;
+                const totalCredits = Math.round(journalEntries.reduce((s, j) => s + (j.totalCreditKes || 0), 0) * 100) / 100;
+                const variance = Math.round(Math.abs(totalDebits - totalCredits) * 100) / 100;
+                const isBalanced = variance < 0.01;
+                return (
+                  <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 text-xs">
+                    <div className="text-right">
+                      <div className="text-[10px] text-slate-400 font-bold uppercase">Total Debits</div>
+                      <div className="font-mono font-bold text-[#0A006E]">{formatKes(totalDebits)}</div>
+                    </div>
+                    <div className="text-slate-300 font-bold">=</div>
+                    <div className="text-left">
+                      <div className="text-[10px] text-slate-400 font-bold uppercase">Total Credits</div>
+                      <div className="font-mono font-bold text-[#1E9E60]">{formatKes(totalCredits)}</div>
+                    </div>
+                    <div className="ml-2 pl-2 border-l border-slate-200">
+                      <span className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase ${
+                        isBalanced ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
+                      }`}>
+                        {isBalanced ? '✓ 100% Balanced' : `Imbalance: ${formatKes(variance)}`}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="divide-y divide-slate-200 max-h-[600px] overflow-y-auto">
-              {journalEntries.map(entry => (
+              {journalEntries.map(entry => {
+                const isEntryBalanced = Math.abs((entry.totalDebitKes || 0) - (entry.totalCreditKes || 0)) < 0.01;
+                return (
                 <div key={entry.id} className="p-4 space-y-2">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs gap-1">
                     <div className="flex items-center space-x-2">
@@ -528,6 +563,11 @@ export const AccountingHub: React.FC = () => {
                       <span>{entry.date}</span>
                       <span>•</span>
                       <span className="text-slate-700 font-bold">{entry.postedBy}</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                        isEntryBalanced ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700'
+                      }`}>
+                        {isEntryBalanced ? '✓ Balanced' : 'Imbalance'}
+                      </span>
                     </div>
                   </div>
 
@@ -560,7 +600,8 @@ export const AccountingHub: React.FC = () => {
                     </table>
                   </div>
                 </div>
-              ))}
+              );
+            })}
             </div>
           </div>
 

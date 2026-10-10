@@ -80,6 +80,27 @@ const TEST_PRODUCTS: Product[] = [
     vatRate: 0.16,
     exciseDutyPerLitreKes: 142,
     kraExciseStampType: 'DIGITAL_EXCISE_STAMP'
+  },
+  {
+    id: 'prod-jw-black',
+    sku: 'IPS-WHI-002',
+    barcode: '5000267024202',
+    caseBarcode: '15000267024209',
+    name: 'Johnnie Walker Black Label 1L',
+    brand: 'Johnnie Walker',
+    category: 'IPS',
+    subCategory: 'Whisky',
+    volumeMl: 1000,
+    alcoholPercentage: 40,
+    packSize: 12,
+    countryOfOrigin: 'Scotland',
+    warehouseCostKes: 3800,
+    wholesalePriceKes: 4600,
+    retailPriceKes: 5200,
+    minWholesaleQty: 6,
+    vatRate: 0.16,
+    exciseDutyPerLitreKes: 350,
+    kraExciseStampType: 'IMPORT_DUTY_STAMP'
   }
 ];
 
@@ -93,6 +114,17 @@ function createTestInventory(): InventoryItem[] {
       casesOnHand: 1,
       reorderLevel: 12,
       batchNumber: 'BATCH-2026-A',
+      expiryDate: '2030-12-31',
+      lastScannedAt: new Date().toISOString()
+    },
+    {
+      id: 'inv-branch-1-jw-black',
+      branchId: 'branch-1',
+      productId: 'prod-jw-black',
+      bottlesOnHand: 20,
+      casesOnHand: 1,
+      reorderLevel: 5,
+      batchNumber: 'BATCH-2026-JW',
       expiryDate: '2030-12-31',
       lastScannedAt: new Date().toISOString()
     },
@@ -148,6 +180,15 @@ async function runProductionErpTests(): Promise<void> {
     department: 'INVENTORY',
     branchId: 'branch-wh-01',
     rawPin: '345678'
+  });
+  engine.registerOrUpdateStaffPin({
+    staffId: 'emp-rep-01',
+    name: 'Sarah Wanjiku',
+    codeOrNumber: 'EMP-104',
+    role: 'STAFF',
+    department: 'AFFILIATES',
+    branchId: 'branch-1',
+    rawPin: '456789'
   });
 
   // ---------------------------------------------------------------------------
@@ -361,6 +402,71 @@ async function runProductionErpTests(): Promise<void> {
   assert.ok(paymentRecord, 'Payment record must exist');
   assert.ok(receiptRecord, 'Receipt record must exist and link to paymentId');
   assert.equal(receiptRecord.paymentId, paymentRecord.id);
+
+  // Verify Sales Person Direct Self-Checkout (Without Queuing to Cashier)
+  const selfCashoutRes = engine.executePosCheckout({
+    user: {
+      userId: 'emp-rep-01',
+      name: 'Sarah Wanjiku',
+      role: 'STAFF',
+      department: 'AFFILIATES',
+      branchId: 'branch-1'
+    },
+    branchId: 'branch-1',
+    items: [{ productId: 'prod-jw-black', quantity: 1 }],
+    paymentMethod: 'CASH',
+    cashierId: 'emp-rep-01',
+    cashierName: 'Sarah Wanjiku (Direct Self-Checkout)',
+    salesPersonId: 'aff-sarah',
+    salesPersonName: 'Sarah Wanjiku',
+    checkoutRole: 'SALES_REP_SELF_CHECKOUT',
+    idempotencyKey: 'idemp-self-cashout-001',
+    ipAddress: '10.0.0.10'
+  });
+  assert.equal(selfCashoutRes.status, 200, 'Salesperson self-cashout must succeed directly');
+  const selfOrderNumber = String(selfCashoutRes.body.orderNumber);
+  const selfSaleRecord = engine.sales.get(selfOrderNumber);
+  assert.ok(selfSaleRecord);
+  assert.equal(selfSaleRecord.checkoutRole, 'SALES_REP_SELF_CHECKOUT');
+  assert.equal(selfSaleRecord.salesPersonId, 'aff-sarah');
+  assert.equal(selfSaleRecord.salesPersonName, 'Sarah Wanjiku');
+  const selfJournal = engine.journalEntries.find(j => j.referenceNumber === selfOrderNumber);
+  assert.ok(selfJournal);
+  assert.equal(selfJournal.totalDebitKes, selfJournal.totalCreditKes, 'Salesperson self-cashout journal must be strictly balanced');
+
+  // Verify Counter Cashier Checkout for Sales Rep order recalled from queue
+  const repRecallRes = engine.executePosCheckout({
+    user: {
+      userId: 'emp-pos-01',
+      name: 'Kevin Otieno',
+      role: 'CASHIER',
+      department: 'POS',
+      branchId: 'branch-1'
+    },
+    branchId: 'branch-1',
+    items: [{ productId: 'prod-jw-black', quantity: 1 }],
+    paymentMethod: 'MPESA',
+    cashierId: 'emp-pos-01',
+    cashierName: 'Kevin Otieno',
+    salesPersonId: 'aff-sarah',
+    salesPersonName: 'Sarah Wanjiku',
+    checkoutRole: 'COUNTER_CASHIER_REP_RECALL',
+    idempotencyKey: 'idemp-rep-recall-001',
+    ipAddress: '10.0.0.10'
+  });
+  assert.equal(repRecallRes.status, 200, 'Counter cashier checkout of rep order must succeed');
+  const repRecallOrderNumber = String(repRecallRes.body.orderNumber);
+  const repRecallSaleRecord = engine.sales.get(repRecallOrderNumber);
+  assert.ok(repRecallSaleRecord);
+  assert.equal(repRecallSaleRecord.checkoutRole, 'COUNTER_CASHIER_REP_RECALL');
+  assert.equal(repRecallSaleRecord.cashierId, 'emp-pos-01');
+  assert.equal(repRecallSaleRecord.cashierName, 'Kevin Otieno');
+  assert.equal(repRecallSaleRecord.salesPersonId, 'aff-sarah');
+  assert.equal(repRecallSaleRecord.salesPersonName, 'Sarah Wanjiku');
+  const repRecallJournal = engine.journalEntries.find(j => j.referenceNumber === repRecallOrderNumber);
+  assert.ok(repRecallJournal);
+  assert.equal(repRecallJournal.totalDebitKes, repRecallJournal.totalCreditKes, 'Rep recall checkout journal must be strictly balanced');
+
   console.log('  ✓ End-to-End POS Checkout, Idempotency, Ledger, Low-Stock Alert & Balanced Journal verified.');
 
   // ---------------------------------------------------------------------------

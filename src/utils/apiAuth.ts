@@ -36,7 +36,21 @@ export function clearStoredSessionToken(): void {
   }
 }
 
-export function getAuthHeaders(): Record<string, string> {
+export function getAuthHeaders(branchId?: string): Record<string, string> {
   const token = getStoredSessionToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const headers: Record<string, string> = {
+    'x-vaairo-terminal-sync': '1'
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  const resolvedBranch =
+    branchId ||
+    (typeof localStorage !== 'undefined'
+      ? localStorage.getItem('vaairo_active_branch_id') || localStorage.getItem('activeBranchId')
+      : '');
+  if (resolvedBranch) {
+    headers['x-branch-id'] = resolvedBranch;
+  }
+  return headers;
 }

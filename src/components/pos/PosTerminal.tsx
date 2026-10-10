@@ -84,6 +84,8 @@ export const PosTerminal: React.FC = () => {
     cart, 
     selectedAffiliate,
     setSelectedAffiliate,
+    recalledSalesPerson,
+    setRecalledSalesPerson,
     addToCart, 
     removeFromCart, 
     updateCartItemQty, 
@@ -1061,6 +1063,32 @@ export const PosTerminal: React.FC = () => {
       }
     }
 
+    // Explicitly wire the relationship between Cashier and Salesperson
+    let saleCashierId = activeCounterCashierId;
+    let saleCashierName = activeCounterCashierName || currentUser.name;
+    let salePersonId: string | undefined = undefined;
+    let salePersonName: string | undefined = undefined;
+    let saleCheckoutRole: 'SALES_REP_SELF_CHECKOUT' | 'COUNTER_CASHIER_DIRECT' | 'COUNTER_CASHIER_REP_RECALL' = 'COUNTER_CASHIER_DIRECT';
+
+    if (posStationMode === 'SALES_LADY') {
+      // 1. SALES PERSON SELF-CHECKOUT: Cashout by themselves without queueing to cashier
+      salePersonId = activeSalesLadyAffiliate?.id || currentUser.id;
+      salePersonName = activeSalesLadyAffiliate?.name || currentUser.name;
+      saleCashierId = currentUser.id;
+      saleCashierName = `${salePersonName} (Direct Self-Checkout)`;
+      saleCheckoutRole = 'SALES_REP_SELF_CHECKOUT';
+    } else {
+      // 2. COUNTER CASHIER CHECKOUT:
+      // Can checkout sales made directly from counter OR checkout orders received from sales reps
+      if (recalledSalesPerson || selectedAffiliate) {
+        salePersonId = recalledSalesPerson?.id || selectedAffiliate?.id;
+        salePersonName = recalledSalesPerson?.name || selectedAffiliate?.name;
+        saleCheckoutRole = 'COUNTER_CASHIER_REP_RECALL';
+      } else {
+        saleCheckoutRole = 'COUNTER_CASHIER_DIRECT';
+      }
+    }
+
     // Fire sale into ERP Context (verifies Daraja transaction via /api/mpesa/verify before committing)
     const res = await completeSale({
       customerName: customerName.trim() || undefined,
@@ -1071,7 +1099,12 @@ export const PosTerminal: React.FC = () => {
       mpesaPhone: customerPhone.trim() || undefined,
       mpesaReceiptNumber: cleanReceipt || undefined,
       checkoutRequestId: resolvedCheckoutRequestId,
-      servedByName: currentUser.name
+      servedByName: posStationMode === 'SALES_LADY' ? salePersonName : saleCashierName,
+      cashierId: saleCashierId,
+      cashierName: saleCashierName,
+      salesPersonId: salePersonId,
+      salesPersonName: salePersonName,
+      checkoutRole: saleCheckoutRole
     });
 
     if (!res.success) {
@@ -1254,11 +1287,7 @@ export const PosTerminal: React.FC = () => {
       if (typeof window !== 'undefined' && window.innerWidth < 1024 && mobilePosTab !== 'CHECKOUT') {
         setMobilePosTab('CHECKOUT');
       }
-      if (posStationMode === 'SALES_LADY') {
-        handleSalesLadySubmitToQueue('PAY_ON_COLLECTION');
-      } else {
-        void handleCheckout();
-      }
+      void handleCheckout();
     };
     window.addEventListener('vaairo:pos-prompt', onBottomNavPrompt);
     window.addEventListener('vaairo:pos-checkout', onBottomNavCheckout);
@@ -1558,9 +1587,8 @@ export const PosTerminal: React.FC = () => {
                   </button>
                 )}
 
-                {/* Station Mode Switcher Pills (Hidden when a Sales Representative is strictly logged in as AFFILIATES staff) */}
-                {!(currentRole === 'STAFF' && currentDepartment === 'AFFILIATES') && (
-                  <div className="grid grid-cols-2 sm:inline-flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 w-full sm:w-auto shrink-0">
+                {/* Station Mode Switcher Pills */}
+                <div className="grid grid-cols-2 sm:inline-flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 w-full sm:w-auto shrink-0">
                     <button
                       type="button"
                       onClick={() => setPosStationMode('COUNTER_CASHIER')}
@@ -1586,51 +1614,48 @@ export const PosTerminal: React.FC = () => {
                       <span>Sales Representative</span>
                     </button>
                   </div>
-                )}
               </div>
             </div>
 
-            {/* Sales Lady Assigned POS Cashier Selector Bar */}
+            {/* Sales Lady Direct Self-Checkout & Optional Counter Queue Bar */}
             {posStationMode === 'SALES_LADY' && (
-              <div className="pt-2.5 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                <div className="text-[11px] font-montserrat font-bold text-slate-700">
-                  <span className="text-[#0A006E] font-black uppercase">Working Under POS Cashier: </span>
+              <div className="pt-2.5 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-emerald-50/90 p-3 rounded-xl border border-emerald-300">
+                <div className="text-[11px] font-montserrat font-bold text-slate-800 flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0 animate-pulse" />
                   <span>
-                    Orders you submit go strictly to{' '}
-                    <strong className="text-[#1E9E60]">
-                      {workingUnderCashier?.name ||
-                        activeSalesLadyAffiliate?.assignedCashierName ||
-                        'Assigned POS Cashier'}
-                    </strong>
-                    &apos;s Collection Queue
+                    <strong className="text-[#0A006E] font-black uppercase">Direct Self-Checkout Active: </strong>
+                    <span>You can cash out sales directly and issue customer receipts instantly, or optionally queue orders to counter cashier for collection.</span>
                   </span>
                 </div>
                 {availablePosCashiers.length > 0 && (
-                  <select
-                    value={
-                      workingUnderCashier?.id ||
-                      activeSalesLadyAffiliate?.assignedCashierId ||
-                      ''
-                    }
-                    onChange={(e) => {
-                      const chosen = allPosCashiers.find(c => c.id === e.target.value);
-                      setSelectedWorkingCashierId(e.target.value);
-                      if (chosen && activeSalesLadyAffiliate) {
-                        updateAffiliateAssignedCashier(
-                          activeSalesLadyAffiliate.id,
-                          chosen.id,
-                          chosen.name
-                        );
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-[10px] text-slate-500 font-semibold">Optional Counter Queue:</span>
+                    <select
+                      value={
+                        workingUnderCashier?.id ||
+                        activeSalesLadyAffiliate?.assignedCashierId ||
+                        ''
                       }
-                    }}
-                    className="px-2.5 py-1.5 bg-white border border-[#0A006E]/30 rounded-lg text-xs font-montserrat font-bold text-[#0A006E] shrink-0"
-                  >
-                    {availablePosCashiers.map(cashier => (
-                      <option key={cashier.id} value={cashier.id}>
-                        POS Cashier: {cashier.name} ({cashier.employeeNumber})
-                      </option>
-                    ))}
-                  </select>
+                      onChange={(e) => {
+                        const chosen = allPosCashiers.find(c => c.id === e.target.value);
+                        setSelectedWorkingCashierId(e.target.value);
+                        if (chosen && activeSalesLadyAffiliate) {
+                          updateAffiliateAssignedCashier(
+                            activeSalesLadyAffiliate.id,
+                            chosen.id,
+                            chosen.name
+                          );
+                        }
+                      }}
+                      className="px-2.5 py-1.5 bg-white border border-[#0A006E]/30 rounded-lg text-xs font-montserrat font-bold text-[#0A006E] shrink-0"
+                    >
+                      {availablePosCashiers.map(cashier => (
+                        <option key={cashier.id} value={cashier.id}>
+                          POS Cashier: {cashier.name} ({cashier.employeeNumber})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 )}
               </div>
             )}
@@ -2346,11 +2371,11 @@ export const PosTerminal: React.FC = () => {
                   <div>
                     <h3 className="font-montserrat font-black text-base text-slate-900">
                       {posStationMode === 'SALES_LADY'
-                        ? 'Sales Representative Customer Order'
-                        : 'Counter Cashier Checkout'}
+                        ? 'Sales Representative POS (Direct Cash Out)'
+                        : 'Counter Cashier POS (Direct Counter Checkout)'}
                     </h3>
                     <p className="text-xs text-slate-500">
-                      {cart.length} unique line items • {posStationMode === 'SALES_LADY' ? 'Submits to Counter Queue' : 'Counter Settlement'}
+                      {cart.length} unique line items • {posStationMode === 'SALES_LADY' ? 'Direct Self-Checkout / Cash Out' : 'Counter Settlement'}
                     </p>
                   </div>
                 </div>
@@ -2412,25 +2437,102 @@ export const PosTerminal: React.FC = () => {
                 </div>
               </div>
 
-              {/* Active Sales Staff Attribution Banner (Served by - [Name] on Thermal Receipt) */}
-              <div className="py-2.5 px-3 my-2 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-2 relative">
-                <div className="flex items-center gap-2 min-w-0">
-                  <UserCheck className="w-4 h-4 text-[#0A006E] shrink-0" />
-                  <div className="text-xs truncate">
-                    <span className="text-slate-500 font-medium">Receipt Attribution: </span>
-                    <strong className="font-mono font-bold text-[#0A006E]">
-                      Served by - {currentUser.name}
-                    </strong>
+              {/* Active Staff Relationship Attribution Banner (Cashier & Sales Rep Relationship) */}
+              <div className="py-2.5 px-3 my-2 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5 relative">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <UserCheck className="w-4 h-4 text-[#0A006E] shrink-0" />
+                    <div className="text-xs truncate">
+                      {posStationMode === 'SALES_LADY' ? (
+                        <span>
+                          <span className="text-slate-500 font-medium">Sales Rep: </span>
+                          <strong className="font-mono font-bold text-[#0A006E]">
+                            {activeSalesLadyAffiliate?.name || currentUser.name}
+                          </strong>
+                          <span className="ml-1.5 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                            Self-Checkout (No Queueing)
+                          </span>
+                        </span>
+                      ) : recalledSalesPerson || selectedAffiliate ? (
+                        <span>
+                          <span className="text-slate-500 font-medium">Cashier: </span>
+                          <strong className="font-mono font-bold text-[#0A006E] mr-1">
+                            {activeCounterCashierName}
+                          </strong>
+                          <span className="text-slate-400">•</span>
+                          <span className="text-slate-500 font-medium ml-1">Sales Rep: </span>
+                          <strong className="font-mono font-bold text-emerald-700">
+                            {recalledSalesPerson?.name || selectedAffiliate?.name}
+                          </strong>
+                          <span className="ml-1.5 px-1.5 py-0.5 rounded bg-blue-100 text-[#0A006E] text-[10px] font-bold">
+                            Rep Order Linked
+                          </span>
+                        </span>
+                      ) : (
+                        <span>
+                          <span className="text-slate-500 font-medium">Counter Cashier: </span>
+                          <strong className="font-mono font-bold text-[#0A006E]">
+                            {activeCounterCashierName}
+                          </strong>
+                          <span className="ml-1.5 px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[10px] font-bold">
+                            Direct Counter Sale
+                          </span>
+                        </span>
+                      )}
+                    </div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => openStaffPinPrompt()}
+                    className="text-[10px] font-montserrat font-black text-[#0A006E] bg-[#FFDE00] hover:bg-[#FFDE00]/85 px-2.5 py-1.5 rounded-lg border border-[#0A006E]/30 shrink-0 transition flex items-center gap-1 shadow-2xs cursor-pointer"
+                  >
+                    <Lock className="w-3 h-3 text-[#0A006E]" />
+                    <span>Switch Staff</span>
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => openStaffPinPrompt()}
-                  className="text-[10px] font-montserrat font-black text-[#0A006E] bg-[#FFDE00] hover:bg-[#FFDE00]/85 px-2.5 py-1.5 rounded-lg border border-[#0A006E]/30 shrink-0 transition flex items-center gap-1 shadow-2xs"
-                >
-                  <Lock className="w-3 h-3 text-[#0A006E]" />
-                  <span>Switch Staff</span>
-                </button>
+
+                {/* Sub-strip detailing relationship between Cashier and Salesperson */}
+                <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-200/60 gap-1">
+                  {posStationMode === 'SALES_LADY' ? (
+                    <div className="flex items-center gap-1.5 text-[10px]">
+                      <span className="text-slate-400">Assigned Counter Cashier:</span>
+                      <strong className="font-semibold text-slate-700">
+                        {workingUnderCashier?.name || activeSalesLadyAffiliate?.assignedCashierName || 'Branch Cashier'}
+                      </strong>
+                      <span className="text-emerald-600 font-medium">(Available for optional collection handoff)</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 text-[10px]">
+                      <span className="text-slate-400">Checkout Mode:</span>
+                      <strong className="font-semibold text-slate-700">
+                        {recalledSalesPerson || selectedAffiliate
+                          ? 'Recalled Rep Order (Both Rep Commission & Cashier Till Recorded)'
+                          : 'Counter Direct Checkout (Walk-in Customer)'}
+                      </strong>
+                    </div>
+                  )}
+
+                  {posStationMode === 'COUNTER_CASHIER' && !recalledSalesPerson && (
+                    <div className="flex items-center gap-1 text-[10px]">
+                      <span className="text-slate-400">Link Rep:</span>
+                      <select
+                        value={selectedAffiliate?.id || ''}
+                        onChange={(e) => {
+                          const found = affiliates.find(a => a.id === e.target.value);
+                          setSelectedAffiliate(found || null);
+                        }}
+                        className="px-1.5 py-0.5 bg-white border border-slate-300 rounded text-[10px] font-medium text-slate-700"
+                      >
+                        <option value="">None (Counter Walk-in)</option>
+                        {(branchAffiliates.length > 0 ? branchAffiliates : affiliates).map(a => (
+                          <option key={a.id} value={a.id}>
+                            {a.name} ({a.code})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {holdFeedback && (
@@ -3242,16 +3344,16 @@ export const PosTerminal: React.FC = () => {
                 </div>
 
                 {posStationMode === 'SALES_LADY' ? (
-                  /* SALES AFFILIATE LADY ACTIONS: Prompt, Print & Hold, or Checkout (Submit to Cashier) */
-                  <div className="grid grid-cols-12 gap-2 items-stretch">
+                  /* SALES REPRESENTATIVE ACTIONS: Prompt, Hold Slip, Queue to Cashier, and Direct Cash Out */
+                  <div className="grid grid-cols-12 gap-1.5 sm:gap-2 items-stretch">
                     <button
                       type="button"
                       onClick={handleOpenPosPrompt}
                       disabled={cart.length === 0 || isWarehouse || isProcessingStk}
-                      className="col-span-4 py-3 px-2.5 bg-[#34D186] hover:bg-[#1E9E60] text-[#0A006E] border border-[#FFDE00]/60 rounded-xl font-montserrat font-black text-xs shadow-md disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-1.5 text-center cursor-pointer"
+                      className="col-span-3 py-3 px-1.5 bg-[#34D186] hover:bg-[#1E9E60] text-[#0A006E] border border-[#FFDE00]/60 rounded-xl font-montserrat font-black text-[11px] sm:text-xs shadow-md disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-1 text-center cursor-pointer"
                       title="Send M-Pesa STK Push Prompt to Customer Phone"
                     >
-                      <Smartphone className="w-4 h-4 shrink-0" />
+                      <Smartphone className="w-3.5 h-3.5 shrink-0" />
                       <span>Prompt</span>
                     </button>
 
@@ -3259,24 +3361,37 @@ export const PosTerminal: React.FC = () => {
                       type="button"
                       onClick={() => handleSalesLadySubmitToQueue('PRINT_RECEIPT_AND_HOLD')}
                       disabled={cart.length === 0 || isWarehouse}
-                      className="col-span-4 py-3 px-2.5 bg-white/10 hover:bg-white/20 text-white border border-white/25 rounded-xl font-montserrat font-black text-[11px] shadow-md disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-1 text-center cursor-pointer"
+                      className="col-span-2 py-3 px-1 bg-white/10 hover:bg-white/20 text-white border border-white/25 rounded-xl font-montserrat font-bold text-[10px] shadow-md disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-0.5 text-center cursor-pointer"
+                      title="Print 80mm thermal slip & hold order"
                     >
-                      <Printer className="w-3.5 h-3.5 text-[#FFDE00] shrink-0" />
-                      <span>Hold Slip</span>
+                      <Printer className="w-3 h-3 text-[#FFDE00] shrink-0" />
+                      <span>Slip</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => handleSalesLadySubmitToQueue('PAY_ON_COLLECTION')}
                       disabled={cart.length === 0 || isWarehouse}
-                      className="col-span-4 py-3 px-3 bg-[#FFDE00] hover:bg-amber-400 text-[#0A006E] border-2 border-[#FFDE00] rounded-xl font-montserrat font-black text-xs shadow-lg disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-1.5 text-center cursor-pointer"
+                      className="col-span-2 py-3 px-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-400/40 rounded-xl font-montserrat font-bold text-[10px] shadow-md disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-1 text-center cursor-pointer"
+                      title="Optional: Queue order to counter cashier for collection"
                     >
-                      <Send className="w-4 h-4 text-[#0A006E] shrink-0" />
-                      <span>Checkout</span>
+                      <Send className="w-3 h-3 text-[#FFDE00] shrink-0" />
+                      <span>Queue</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleCheckout}
+                      disabled={cart.length === 0 || isWarehouse || isProcessingStk}
+                      className="col-span-5 py-3 px-2 bg-[#FFDE00] hover:bg-amber-400 text-[#0A006E] border-2 border-[#FFDE00] rounded-xl font-montserrat font-black text-xs sm:text-sm shadow-lg disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-1.5 text-center cursor-pointer"
+                      title="Direct Self-Checkout: Cash out sale and issue receipt immediately by yourself without queuing to cashier"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-[#0A006E] shrink-0" />
+                      <span>Cash Out (Self-Checkout)</span>
                     </button>
                   </div>
                 ) : (
-                  /* COUNTER CASHIER ACTIONS: Print & Hold, M-Pesa STK Prompt, and Checkout */
+                  /* COUNTER CASHIER ACTIONS: Print & Hold, M-Pesa STK Prompt, and Counter Checkout */
                   <div className="grid grid-cols-12 gap-2 items-stretch">
                     <button
                       type="button"
@@ -3304,10 +3419,19 @@ export const PosTerminal: React.FC = () => {
                       type="button"
                       onClick={handleCheckout}
                       disabled={cart.length === 0 || isWarehouse || isProcessingStk}
-                      className="col-span-5 py-3 px-3 bg-[#FFDE00] hover:bg-amber-400 text-[#0A006E] border-2 border-[#FFDE00] rounded-xl font-montserrat font-black text-xs sm:text-sm shadow-lg disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-1.5 text-center cursor-pointer"
+                      className="col-span-5 py-3 px-2 bg-[#FFDE00] hover:bg-amber-400 text-[#0A006E] border-2 border-[#FFDE00] rounded-xl font-montserrat font-black text-xs sm:text-sm shadow-lg disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-1.5 text-center cursor-pointer"
+                      title={
+                        recalledSalesPerson || selectedAffiliate
+                          ? `Counter Checkout: Process order for Sales Rep ${recalledSalesPerson?.name || selectedAffiliate?.name} (both rep commission and cashier reconciliation recorded)`
+                          : 'Counter Checkout: Complete direct sale made from counter & issue receipt immediately'
+                      }
                     >
                       <CheckCircle2 className="w-4 h-4 shrink-0" />
-                      <span>Checkout</span>
+                      <span>
+                        {recalledSalesPerson || selectedAffiliate
+                          ? 'Checkout Rep Order'
+                          : 'Counter Checkout'}
+                      </span>
                     </button>
                   </div>
                 )}
@@ -4743,7 +4867,18 @@ export const PosTerminal: React.FC = () => {
                             return (
                               <tr key={order.id} className="hover:bg-slate-50/80">
                                 <td className="py-3 px-4">
-                                  <div className="font-mono font-black text-[#0A006E]">{order.orderNumber}</div>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-mono font-black text-[#0A006E]">{order.orderNumber}</span>
+                                    {order.checkoutRole === 'SALES_REP_SELF_CHECKOUT' ? (
+                                      <span className="px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 text-[9px] font-bold">
+                                        Self-Checkout
+                                      </span>
+                                    ) : (
+                                      <span className="px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 text-[9px] font-bold">
+                                        Counter Cashier: {order.cashierName}
+                                      </span>
+                                    )}
+                                  </div>
                                   <div className="font-mono text-[10px] text-slate-500">
                                     {new Date(order.createdAt).toLocaleString()}
                                   </div>

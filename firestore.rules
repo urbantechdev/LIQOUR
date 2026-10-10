@@ -34,7 +34,7 @@ service cloud.firestore {
     // Authorization derives from verified runtime admin identity, custom claims, or active server-controlled organizationMemberships.
     function isAdmin() {
       return isAuthenticated() && (
-        (request.auth.token.email in ['gduniversalstudio@gmail.com'] && request.auth.token.email_verified == true) ||
+        (request.auth.token.email in ['gduniversalstudio@gmail.com', 'zamodasports@gmail.com'] && request.auth.token.email_verified == true) ||
         request.auth.token.admin == true ||
         request.auth.token.role in ['SUPER_ADMIN', 'ORG_OWNER', 'ORG_ADMIN'] ||
         hasActiveAdminMembership('org-merchant-vaairo-hq') ||

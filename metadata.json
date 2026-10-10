@@ -1,6 +1,6 @@
 {
-  "name": "Kenyalux ERP & Alcohol Distribution",
-  "description": "Enterprise Kenyan Alcohol ERP with KRA eTIMS compliance, Daraja M-Pesa automated reconciliation, IPS/LPS inventory, and multi-tier distribution hierarchy.",
+  "name": "VAAIRO LIQUOR HUB",
+  "description": "Direct Company Price online liquor store, POS counter checkout, ERP inventory, staff management, and automated sales reconciliation.",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

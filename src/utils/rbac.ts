@@ -379,6 +379,8 @@ export function getRolePermissions(role: ExtendedErpRole, department: Department
       };
 
     case 'AFFILIATES':
+    case 'SALES_REP' as any:
+    case 'SALES_PERSON' as any:
       return {
         role: 'STAFF',
         department: effectiveDepartment,
@@ -447,7 +449,17 @@ export function canAccessBranch(
 ): boolean {
   const perms = getRolePermissions(role, department);
   if (perms.allBranchesAccess) return true;
-  if (!targetBranchId || !userAssignedBranchId) return false;
+  if (!targetBranchId) return true;
+  if (
+    !userAssignedBranchId ||
+    userAssignedBranchId === 'branch-hq-main' ||
+    userAssignedBranchId === 'all' ||
+    userAssignedBranchId === 'unassigned' ||
+    userAssignedBranchId === 'terminal-user' ||
+    userAssignedBranchId === 'terminal-staff-active'
+  ) {
+    return true;
+  }
   return userAssignedBranchId === targetBranchId;
 }
 
