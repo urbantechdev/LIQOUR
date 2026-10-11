@@ -495,6 +495,15 @@ async function startServer() {
     }
 
     const token = createSessionToken(authResult.user);
+    void firestoreAuthoritativeStore.persistUserRecordToFirestore(authResult.user.userId, {
+      id: authResult.user.userId,
+      name: authResult.user.name,
+      role: authResult.user.role,
+      department: authResult.user.department,
+      branchId: authResult.user.branchId,
+      organizationId: authResult.user.organizationId,
+      lastLoginAt: new Date().toISOString()
+    });
     return res.status(200).json({
       success: true,
       token,
@@ -510,7 +519,7 @@ async function startServer() {
     const targetOrg = String(organizationId || 'org-merchant-vaairo-hq');
 
     const builtInSuperAdmins = [
-      'gduniversalstudio@gmail.com',
+      'urbaninteriorkenya@gmail.com',
       ...(process.env.ADMIN_EMAILS || '')
         .split(',')
         .map(e => e.trim().toLowerCase())
@@ -562,6 +571,16 @@ async function startServer() {
       organizationId: targetOrg
     };
     const token = createSessionToken(sessionUser);
+    void firestoreAuthoritativeStore.persistUserRecordToFirestore(resolvedUserId, {
+      id: resolvedUserId,
+      name: sessionUser.name,
+      email: cleanEmail,
+      role: resolvedRole,
+      department: targetDept,
+      branchId: sessionUser.branchId,
+      organizationId: targetOrg,
+      lastLoginAt: new Date().toISOString()
+    });
     return res.status(200).json({
       success: true,
       token,
@@ -765,6 +784,10 @@ async function startServer() {
         ...session,
         permissions: membership.permissions
       }
+    });
+    void firestoreAuthoritativeStore.persistUserRecordToFirestore(session.userId, {
+      ...session,
+      lastLoginAt: new Date().toISOString()
     });
   });
 
@@ -1230,7 +1253,7 @@ async function startServer() {
       ['SUPER_ADMIN', 'ORG_OWNER', 'ORG_ADMIN', 'BRANCH_MANAGER', 'SALES_MANAGER', 'ACCOUNTANT'].includes(user.role) ||
       user.department === 'BRANCH_MANAGER' ||
       user.department === 'SALES_MANAGER' ||
-      (user.email && (user.email === 'gduniversalstudio@gmail.com' || (process.env.ADMIN_EMAILS || '').includes(user.email)));
+      (user.email && (user.email === 'urbaninteriorkenya@gmail.com' || (process.env.ADMIN_EMAILS || '').includes(user.email)));
 
     if (!isAuthorized) {
       return res.status(403).json({ error: 'Forbidden: Insufficient privileges to clean sales data.' });
@@ -1258,6 +1281,43 @@ async function startServer() {
       message: 'All sales and transaction data cleaned successfully.',
       cleanedSalesCount: engineResult.cleanedSalesCount,
       remoteDeletedCount: firestoreResult.deletedCount
+    });
+  });
+
+  app.post('/api/admin/wipe-all-data', authenticateSession, async (req: Request, res: Response) => {
+    const user = (req as any).user as SessionUser;
+    const isAuthorized =
+      !user ||
+      ['SUPER_ADMIN', 'ORG_OWNER', 'ORG_ADMIN'].includes(user.role) ||
+      user.department === 'BRANCH_MANAGER' ||
+      (user.email && (user.email === 'urbaninteriorkenya@gmail.com' || (process.env.ADMIN_EMAILS || '').includes(user.email)));
+
+    if (!isAuthorized) {
+      return res.status(403).json({ error: 'Forbidden: Insufficient privileges to wipe platform operational data.' });
+    }
+
+    const engineResult = erpEngine.wipeAllOperationalData();
+    const firestoreResult = await firestoreAuthoritativeStore.wipeAllOperationalData();
+
+    if (user?.userId) {
+      erpEngine.recordAudit({
+        action: 'WIPE_ALL_OPERATIONAL_DATA',
+        userId: user.userId,
+        userName: user.name || 'Executive Administrator',
+        userRole: user.role,
+        department: user.department || 'MANAGEMENT',
+        branchId: user.branchId,
+        module: 'SECURITY',
+        ipAddress: getClientIp(req),
+        actionDetails: `Wiped all operational platform data (${engineResult.cleanedSalesCount} sales, ${engineResult.cleanedLedgerCount} ledger entries, ${engineResult.cleanedStaffCount} staff accounts. Cloud deleted: ${firestoreResult.deletedCount}).`
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Platform operational data, users, and mock records have been wiped. System is in pristine production-ready state.',
+      engineResult,
+      firestoreResult
     });
   });
 
@@ -1820,22 +1880,19 @@ async function startServer() {
 
   app.post('/api/erp/staff-directory/upsert', async (req: Request, res: Response) => {
     const caller = resolveOptionalCallerIdentity(req);
-    const isTerminalSync = req.headers['x-vaairo-terminal-sync'] === '1';
-    if (!caller.authenticated && !isTerminalSync) {
+    if (!caller.authenticated) {
       return res.status(401).json({
-        error: 'Unauthorized: Valid session token or terminal sync header required.'
+        error: 'Unauthorized: Valid authenticated management session token required.'
       });
     }
     if (
-      caller.authenticated &&
       caller.role &&
       caller.role !== 'SUPER_ADMIN' &&
       caller.role !== 'ADMIN' &&
       caller.role !== 'MANAGER' &&
       caller.department !== 'HR_PAYROLL' &&
       caller.department !== 'BRANCH_MANAGER' &&
-      caller.department !== 'SALES_MANAGER' &&
-      !isTerminalSync
+      caller.department !== 'SALES_MANAGER'
     ) {
       return res.status(403).json({
         errorCode: 'STAFF_DIRECTORY_WRITE_FORBIDDEN',
@@ -1868,6 +1925,10 @@ async function startServer() {
   });
 
   app.post('/api/erp/staff-directory/sync-batch', async (req: Request, res: Response) => {
+    const caller = resolveOptionalCallerIdentity(req);
+    if (!caller.authenticated) {
+      return res.status(401).json({ error: 'Unauthorized: Valid management session token required.' });
+    }
     const incoming = Array.isArray(req.body?.records) ? req.body.records : [];
     for (const item of incoming) {
       if (item && typeof item === 'object' && typeof item.id === 'string' && item.id) {
@@ -1890,19 +1951,16 @@ async function startServer() {
 
   app.post('/api/erp/staff-directory/delete', async (req: Request, res: Response) => {
     const caller = resolveOptionalCallerIdentity(req);
-    const isTerminalSync = req.headers['x-vaairo-terminal-sync'] === '1';
-    if (!caller.authenticated && !isTerminalSync) {
+    if (!caller.authenticated) {
       return res.status(401).json({ error: 'Unauthorized: Valid session token required.' });
     }
     if (
-      caller.authenticated &&
       caller.role !== 'SUPER_ADMIN' &&
       caller.role !== 'ADMIN' &&
       caller.role !== 'MANAGER' &&
       caller.department !== 'HR_PAYROLL' &&
       caller.department !== 'BRANCH_MANAGER' &&
-      caller.department !== 'SALES_MANAGER' &&
-      !isTerminalSync
+      caller.department !== 'SALES_MANAGER'
     ) {
       return res.status(403).json({
         errorCode: 'STAFF_DIRECTORY_DELETE_FORBIDDEN',
@@ -1979,6 +2037,119 @@ async function startServer() {
       syncedCount: result.persistedCount,
       docs: await firestoreAuthoritativeStore.getUnifiedStateDocsAuthoritative()
     });
+  });
+
+  // ===========================================================================
+  // REAL-TIME FIREBASE SYNCHRONIZATION: USERS, PRODUCTS (SCANNED/CREATED) & DOCUMENTS
+  // ===========================================================================
+  app.post('/api/users/sync', async (req: Request, res: Response) => {
+    const caller = resolveOptionalCallerIdentity(req);
+    const { userId, name, email, role, department, branchId, organizationId, phone, mfaEnabled } = req.body || {};
+    const targetUserId = String(userId || caller.userId || (email ? `user-${email}` : `user-${Date.now()}`));
+
+    const userDoc: Record<string, unknown> = {
+      id: targetUserId,
+      name: String(name || caller.name || 'System User'),
+      email: String(email || caller.email || '').trim().toLowerCase(),
+      role: String(role || caller.role || 'STAFF'),
+      department: String(department || caller.department || 'BRANCH_MANAGER'),
+      branchId: String(branchId || caller.branchId || 'branch-hq-main'),
+      organizationId: String(organizationId || caller.organizationId || 'org-merchant-vaairo-hq'),
+      phone: phone ? String(phone) : '',
+      mfaEnabled: typeof mfaEnabled === 'boolean' ? mfaEnabled : false,
+      lastLoginAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    const ok = await firestoreAuthoritativeStore.persistUserRecordToFirestore(targetUserId, userDoc);
+    return res.status(200).json({ success: ok, user: userDoc });
+  });
+
+  app.post('/api/products/sync-record', async (req: Request, res: Response) => {
+    const caller = resolveOptionalCallerIdentity(req);
+    const { product, isScan, scanMetadata } = req.body || {};
+    if (!product || typeof product !== 'object' || !product.id) {
+      return res.status(400).json({ error: 'Valid product object with id is required.' });
+    }
+
+    const prodId = String(product.id);
+    const scanInfo = isScan || scanMetadata
+      ? {
+          branchId: scanMetadata?.branchId || caller.branchId || 'branch-hq-main',
+          scanType: scanMetadata?.scanType || 'SINGLE_BOTTLE',
+          scannerUserId: scanMetadata?.scannerUserId || caller.userId || 'system-scanner',
+          scannerName: scanMetadata?.scannerName || caller.name || 'Staff Scanner',
+          scannedAt: scanMetadata?.scannedAt || new Date().toISOString(),
+          barcode: String(product.barcode || scanMetadata?.barcode || '')
+        }
+      : undefined;
+
+    const ok = await firestoreAuthoritativeStore.persistProductRecordToFirestore(
+      prodId,
+      product as Record<string, unknown>,
+      scanInfo
+    );
+
+    // Update in-memory product catalog in engine
+    const existingIdx = erpEngine.products.findIndex(p => p.id === prodId);
+    if (existingIdx >= 0) {
+      erpEngine.products[existingIdx] = { ...erpEngine.products[existingIdx], ...product };
+    } else {
+      erpEngine.products.unshift(product as any);
+    }
+
+    if (scanInfo) {
+      erpEngine.recordAudit({
+        organizationId: caller.organizationId || 'org-merchant-vaairo-hq',
+        userId: scanInfo.scannerUserId,
+        userName: scanInfo.scannerName,
+        branchId: scanInfo.branchId,
+        actionType: 'PRODUCT_BARCODE_SCANNED',
+        actionTitle: `Product Barcode Scanned: ${product.name} (${product.barcode || product.sku})`,
+        module: 'INVENTORY'
+      });
+    }
+
+    return res.status(200).json({
+      success: ok,
+      productId: prodId,
+      scanned: Boolean(scanInfo)
+    });
+  });
+
+  app.post('/api/products/sync-batch', async (req: Request, res: Response) => {
+    const { products } = req.body || {};
+    const items = Array.isArray(products) ? products : [];
+    let syncedCount = 0;
+    for (const item of items) {
+      if (item && typeof item === 'object' && item.id) {
+        const ok = await firestoreAuthoritativeStore.persistProductRecordToFirestore(
+          String(item.id),
+          item as Record<string, unknown>
+        );
+        if (ok) syncedCount++;
+        const idx = erpEngine.products.findIndex(p => p.id === item.id);
+        if (idx >= 0) {
+          erpEngine.products[idx] = { ...erpEngine.products[idx], ...item };
+        } else {
+          erpEngine.products.push(item as any);
+        }
+      }
+    }
+    return res.status(200).json({ success: true, syncedCount });
+  });
+
+  app.post('/api/documents/sync', async (req: Request, res: Response) => {
+    const { documentType, documentId, payload } = req.body || {};
+    if (!documentType || !documentId || !payload) {
+      return res.status(400).json({ error: 'documentType, documentId, and payload are required.' });
+    }
+    const ok = await firestoreAuthoritativeStore.persistDocumentRecordToFirestore(
+      documentType,
+      String(documentId),
+      payload as Record<string, unknown>
+    );
+    return res.status(200).json({ success: ok, documentId: String(documentId), documentType });
   });
 
   // Real-Time Server-Sent Events (SSE) Stream for Instant Cross-Device Sync (PC <-> Mobile)
