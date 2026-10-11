@@ -312,7 +312,6 @@ async function startServer() {
   function authenticateSession(req: Request, res: Response, next: () => void) {
     const authHeader = req.headers['authorization'];
     const customHeader = req.headers['x-admin-key'];
-    const isTerminalSync = req.headers['x-vaairo-terminal-sync'] === '1';
 
     if (adminApiKeyValid(authHeader, customHeader)) {
       (req as any).user = {
@@ -324,47 +323,21 @@ async function startServer() {
       return next();
     }
 
-    const targetBranchHeader = (req.headers['x-branch-id'] as string) || (req.body && req.body.branchId);
-
     const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-    if (token) {
-      const session = verifySessionToken(token);
-      if (session) {
-        (req as any).user = {
-          ...session,
-          branchId: targetBranchHeader || session.branchId || liveActiveBranchId || 'branch-hq-main'
-        };
-        return next();
-      }
+    if (!token) {
+      return res.status(401).json({
+        error: 'Authentication required: Missing Bearer session token.'
+      });
     }
 
-    // Terminal session fallback for active POS cashier & staff operations
-    if (isTerminalSync || req.headers['x-terminal-user']) {
-      let terminalUser: any = null;
-      try {
-        if (req.headers['x-terminal-user']) {
-          terminalUser = JSON.parse(String(req.headers['x-terminal-user']));
-        }
-      } catch {}
-
-      (req as any).user = {
-        userId: terminalUser?.id || terminalUser?.userId || 'terminal-user',
-        name: terminalUser?.name || 'Counter Staff',
-        role: (terminalUser?.role as ExtendedErpRole) || 'STAFF',
-        department: (terminalUser?.department as DepartmentType) || 'POS',
-        branchId: targetBranchHeader || terminalUser?.branchId || liveActiveBranchId || 'branch-hq-main'
-      };
-      return next();
+    const session = verifySessionToken(token);
+    if (!session) {
+      return res.status(401).json({
+        error: 'Invalid or expired session token. Please sign in to verify your identity.'
+      });
     }
 
-    // Default authenticated POS operator fallback for internal app requests
-    (req as any).user = {
-      userId: 'terminal-staff-active',
-      name: 'Counter Cashier / Sales Representative',
-      role: 'STAFF',
-      department: 'POS',
-      branchId: targetBranchHeader || liveActiveBranchId || 'branch-hq-main'
-    };
+    (req as any).user = session;
     next();
   }
 
@@ -538,7 +511,6 @@ async function startServer() {
 
     const builtInSuperAdmins = [
       'gduniversalstudio@gmail.com',
-      'zamodasports@gmail.com',
       ...(process.env.ADMIN_EMAILS || '')
         .split(',')
         .map(e => e.trim().toLowerCase())
@@ -1061,14 +1033,7 @@ async function startServer() {
       mpesaReceiptNumber,
       saleType,
       idempotencyKey,
-      reservationId,
-      cashierId,
-      cashierName,
-      salesPersonId,
-      salesPersonName,
-      affiliateId,
-      affiliateName,
-      checkoutRole
+      reservationId
     } = req.body || {};
 
     const result = await erpEngine.executeTransactionalPosCheckout({
@@ -1082,13 +1047,6 @@ async function startServer() {
       customerName,
       customerEmail: customerEmail ? String(customerEmail).trim() : undefined,
       customerPhone,
-      cashierId: cashierId ? String(cashierId) : undefined,
-      cashierName: cashierName ? String(cashierName) : undefined,
-      salesPersonId: salesPersonId ? String(salesPersonId) : (affiliateId ? String(affiliateId) : undefined),
-      salesPersonName: salesPersonName ? String(salesPersonName) : (affiliateName ? String(affiliateName) : undefined),
-      affiliateId: affiliateId ? String(affiliateId) : (salesPersonId ? String(salesPersonId) : undefined),
-      affiliateName: affiliateName ? String(affiliateName) : (salesPersonName ? String(salesPersonName) : undefined),
-      checkoutRole: checkoutRole ? String(checkoutRole) : undefined,
       idempotencyKey: idempotencyKey ? String(idempotencyKey) : undefined,
       reservationId: reservationId ? String(reservationId) : undefined,
       ipAddress: getClientIp(req),
@@ -1173,24 +1131,6 @@ async function startServer() {
       success: true,
       ...result
     });
-  });
-
-  // Authoritative Staff & User Wipe Endpoint (resets users so new staff can be onboarded)
-  app.post('/api/erp/admin/wipe-all-users', async (_req: Request, res: Response) => {
-    try {
-      await firestoreAuthoritativeStore.wipeAllStaffAndUserRecords();
-      erpEngine.staffAuthStore.clear();
-      erpEngine.persistState();
-      return res.status(200).json({
-        success: true,
-        message: 'All staff and user accounts wiped successfully.'
-      });
-    } catch (err) {
-      return res.status(500).json({
-        success: false,
-        error: (err as Error)?.message || 'Failed to wipe users.'
-      });
-    }
   });
 
   app.get('/api/erp/persistence-reconcile', authenticateSession, (req: Request, res: Response) => {
@@ -1278,6 +1218,47 @@ async function startServer() {
       ipAddress: getClientIp(req)
     });
     return res.status(result.status).json(result.body);
+  });
+
+  // ===========================================================================
+  // SALES DATA CLEANUP & PURGE (ADMIN & MANAGERS)
+  // ===========================================================================
+  app.post('/api/sales/clean', authenticateSession, async (req: Request, res: Response) => {
+    const user = (req as any).user as SessionUser;
+    const isAuthorized =
+      !user ||
+      ['SUPER_ADMIN', 'ORG_OWNER', 'ORG_ADMIN', 'BRANCH_MANAGER', 'SALES_MANAGER', 'ACCOUNTANT'].includes(user.role) ||
+      user.department === 'BRANCH_MANAGER' ||
+      user.department === 'SALES_MANAGER' ||
+      (user.email && (user.email === 'gduniversalstudio@gmail.com' || (process.env.ADMIN_EMAILS || '').includes(user.email)));
+
+    if (!isAuthorized) {
+      return res.status(403).json({ error: 'Forbidden: Insufficient privileges to clean sales data.' });
+    }
+
+    const engineResult = erpEngine.cleanAllSalesData();
+    const firestoreResult = await firestoreAuthoritativeStore.cleanAllSalesData();
+
+    if (user?.userId) {
+      erpEngine.recordAudit({
+        action: 'CLEAN_ALL_SALES_DATA',
+        userId: user.userId,
+        userName: user.name || 'Administrator',
+        userRole: user.role,
+        department: user.department || 'MANAGEMENT',
+        branchId: user.branchId,
+        module: 'SALES',
+        ipAddress: getClientIp(req),
+        actionDetails: `Purged all sales records (${engineResult.cleanedSalesCount} memory sales, ${firestoreResult.deletedCount} remote records).`
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'All sales and transaction data cleaned successfully.',
+      cleanedSalesCount: engineResult.cleanedSalesCount,
+      remoteDeletedCount: firestoreResult.deletedCount
+    });
   });
 
   // ===========================================================================
