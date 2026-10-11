@@ -501,7 +501,7 @@ async function startServer() {
       role: authResult.user.role,
       department: authResult.user.department,
       branchId: authResult.user.branchId,
-      organizationId: authResult.user.organizationId,
+      organizationId: (authResult.user as any).organizationId || 'org-merchant-vaairo-hq',
       lastLoginAt: new Date().toISOString()
     });
     return res.status(200).json({
@@ -878,6 +878,9 @@ async function startServer() {
     department?: DepartmentType;
     userId?: string;
     email?: string;
+    name?: string;
+    branchId?: string;
+    organizationId?: string;
   } {
     const authHeader = req.headers['authorization'];
     const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
@@ -899,7 +902,10 @@ async function startServer() {
       role: session?.role,
       department: session?.department,
       userId,
-      email
+      email,
+      name: session?.name,
+      branchId: session?.branchId,
+      organizationId: session?.organizationId
     };
   }
 
@@ -2103,10 +2109,13 @@ async function startServer() {
         organizationId: caller.organizationId || 'org-merchant-vaairo-hq',
         userId: scanInfo.scannerUserId,
         userName: scanInfo.scannerName,
+        userRole: caller.role || 'STAFF',
+        department: caller.department || 'INVENTORY',
         branchId: scanInfo.branchId,
         actionType: 'PRODUCT_BARCODE_SCANNED',
         actionTitle: `Product Barcode Scanned: ${product.name} (${product.barcode || product.sku})`,
-        module: 'INVENTORY'
+        module: 'INVENTORY',
+        ipAddress: getClientIp(req)
       });
     }
 
