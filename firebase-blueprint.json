@@ -553,9 +553,130 @@
         "updatedAt": { "type": "string", "description": "ISO timestamp when factor was updated" }
       },
       "required": ["userId", "email", "organizationId", "totpSecret", "mfaEnabled", "factorType", "enrolledAt", "updatedAt"]
+    },
+    "UserRecord": {
+      "title": "UserRecord",
+      "description": "Represents an authenticated enterprise ERP user profile.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique user ID or UID" },
+        "name": { "type": "string", "description": "Full name of the user" },
+        "email": { "type": "string", "description": "Corporate email address" },
+        "role": { "type": "string", "description": "ERP Access Control Role" },
+        "department": { "type": "string", "description": "Assigned department" },
+        "branchId": { "type": "string", "description": "Primary operating branch ID" },
+        "organizationId": { "type": "string", "description": "Organization membership ID" },
+        "phone": { "type": "string", "description": "Kenyan mobile phone number" },
+        "mfaEnabled": { "type": "boolean", "description": "Whether MFA is enforced" },
+        "lastLoginAt": { "type": "string", "description": "ISO timestamp of latest session" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of latest record update" }
+      },
+      "required": ["id", "name", "email", "role"]
+    },
+    "ProductRecord": {
+      "title": "ProductRecord",
+      "description": "Represents an inventory catalog product item with universal barcode.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique product SKU or ID" },
+        "name": { "type": "string", "description": "Display product brand name" },
+        "sku": { "type": "string", "description": "Universal product stock-keeping unit" },
+        "barcode": { "type": "string", "description": "Primary unit EAN-13 barcode" },
+        "caseBarcode": { "type": "string", "description": "Outer carton case GTIN-14 barcode" },
+        "category": { "type": "string", "description": "Stock category (IPS or LPS)" },
+        "brand": { "type": "string", "description": "Brand manufacturer" },
+        "packSize": { "type": "number", "description": "Units per master case" },
+        "retailPriceKes": { "type": "number", "description": "Retail price in KES" },
+        "wholesalePriceKes": { "type": "number", "description": "Wholesale price in KES" },
+        "warehouseCostKes": { "type": "number", "description": "Bonded warehouse cost in KES" },
+        "lastScannedAt": { "type": "string", "description": "ISO timestamp when product was last scanned" },
+        "scanCount": { "type": "number", "description": "Total barcode scan counter" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of latest update" }
+      },
+      "required": ["id", "name", "sku", "barcode", "category"]
+    },
+    "ScanHistoryRecord": {
+      "title": "ScanHistoryRecord",
+      "description": "Audit record of an individual barcode scan event.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique scan event ID" },
+        "productId": { "type": "string", "description": "Identified product ID" },
+        "productName": { "type": "string", "description": "Product display name" },
+        "barcode": { "type": "string", "description": "Raw scanned barcode" },
+        "scannedAt": { "type": "string", "description": "ISO timestamp when scanned" },
+        "branchId": { "type": "string", "description": "Branch location where scanned" },
+        "scannerUserId": { "type": "string", "description": "User ID of the operator" },
+        "scannerName": { "type": "string", "description": "Operator staff name" },
+        "scanType": { "type": "string", "description": "Scan event type" }
+      },
+      "required": ["id", "barcode", "scannedAt"]
+    },
+    "DocumentRecord": {
+      "title": "DocumentRecord",
+      "description": "Represents a synchronized enterprise financial or operational document.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique document tracking number or ID" },
+        "documentType": { "type": "string", "description": "Type of document" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last mutation" }
+      },
+      "required": ["id"]
     }
   },
   "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserRecord" },
+      "description": "Stores synchronized authenticated user profiles and permissions."
+    },
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/ProductRecord" },
+      "description": "Master products inventory catalog synchronized with universal barcodes."
+    },
+    "/productsPublic/{productId}": {
+      "schema": { "$ref": "#/entities/ProductRecord" },
+      "description": "Public storefront products catalog without commercial cost secrets."
+    },
+    "/productsPrivate/{productId}": {
+      "schema": { "$ref": "#/entities/ProductRecord" },
+      "description": "Private commercial pricing and margin catalog for enterprise operations."
+    },
+    "/scanHistory/{scanId}": {
+      "schema": { "$ref": "#/entities/ScanHistoryRecord" },
+      "description": "Chronological audit trail of physical barcode scans across registers and branches."
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/SaleRecord" },
+      "description": "Authoritative POS and retail sales orders."
+    },
+    "/etimsInvoices/{docId}": {
+      "schema": { "$ref": "#/entities/FiscalTransactionRecord" },
+      "description": "Official Kenya Revenue Authority eTIMS fiscal invoices and signatures."
+    },
+    "/commercialInvoices/{docId}": {
+      "schema": { "$ref": "#/entities/DocumentRecord" },
+      "description": "B2B commercial invoices issued to distributors and commercial merchants."
+    },
+    "/supplyInvoices/{docId}": {
+      "schema": { "$ref": "#/entities/DocumentRecord" },
+      "description": "Inbound supply invoices and packing lists received from bonded suppliers."
+    },
+    "/commercialQuotes/{docId}": {
+      "schema": { "$ref": "#/entities/DocumentRecord" },
+      "description": "Commercial quotations and formal proforma invoices."
+    },
+    "/purchaseOrders/{docId}": {
+      "schema": { "$ref": "#/entities/DocumentRecord" },
+      "description": "Formal purchase orders issued to suppliers."
+    },
+    "/creditNotes/{docId}": {
+      "schema": { "$ref": "#/entities/DocumentRecord" },
+      "description": "Kenya eTIMS compliant credit notes, returns, and debit/credit adjustments issued by accountants."
+    },
+    "/documents/{docId}": {
+      "schema": { "$ref": "#/entities/DocumentRecord" },
+      "description": "General synchronized enterprise documentation store."
+    },
     "/userTotpFactors/{userId}": {
       "schema": { "$ref": "#/entities/UserTotpFactorRecord" },
       "description": "Stores server-controlled per-user TOTP MFA factor records."

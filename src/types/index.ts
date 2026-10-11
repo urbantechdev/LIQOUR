@@ -1,4 +1,4 @@
-export type UserRole = 'SUPER_ADMIN' | 'ACCOUNTANT' | 'STAFF';
+export type UserRole = 'SUPER_ADMIN' | 'ACCOUNTANT' | 'STAFF' | 'CASHIER' | 'SALES_PERSON' | 'MANAGER';
 
 export type DepartmentType = 
   | 'POS' 
@@ -10,12 +10,15 @@ export type DepartmentType =
   | 'AFFILIATES'
   | 'DELIVERY_MANAGER'
   | 'SALES_MANAGER'
-  | 'BRANCH_MANAGER';
+  | 'BRANCH_MANAGER'
+  | 'CASHIER'
+  | 'SALES_PERSON';
 
 export type BranchTier = 
   | 'WAREHOUSE' 
   | 'MAIN_STORE' 
   | 'DISTRIBUTOR' 
+  | 'SUPERMARKET' 
   | 'LIQUOR_STORE';
 
 export type StockCategory = 'IPS' | 'LPS'; // Imported Products Stock vs Local Products Stock
@@ -188,6 +191,55 @@ export interface SaleOrder {
   etimsInvoiceNumber: string;
   etimsQrPayload: string;
   etimsTransmitted: boolean;
+  salesPersonId?: string; // Floor attendant / sales person who advised the customer
+  salesPersonName?: string; // Name of floor attendant
+  assistedByStaffId?: string; // Alias for floor sales person
+  assistedByStaffName?: string;
+  checkoutLane?: string; // Checkout till lane (e.g. Lane 1 - Express, Lane 2, Lane 3)
+  creditNoteNumber?: string; // Reversing credit note reference
+  creditNoteId?: string;
+  creditNoteIssued?: boolean;
+  refundReason?: string; // Reason if refunded via credit note
+  refundedAt?: string;
+  refundedBy?: string;
+}
+
+export interface CreditNote {
+  id: string;
+  creditNoteNumber: string; // e.g. CN-2026-0001
+  originalInvoiceNumber: string; // e.g. B2B-INV-2026-201 or ORD-2026-0041
+  orderNumber?: string;
+  date: string;
+  clientOrCustomerName: string;
+  clientKraPin?: string;
+  branchId: string;
+  branchName: string;
+  reason:
+    | 'DAMAGED_BREAKAGE'
+    | 'WRONG_ITEM_RETURN'
+    | 'CORKED_QUALITY_DEFECT'
+    | 'OVERBILLING_PRICE_ERROR'
+    | 'ORDER_CANCELLATION'
+    | 'GOODWILL_COMMERCIAL_REBATE'
+    | string;
+  reasonDetails: string;
+  subtotalKes: number;
+  vatKes: number;
+  totalCreditKes: number;
+  status: 'APPROVED' | 'TRANSMITTED_KRA' | 'REFUNDED' | 'APPLIED_TO_BALANCE';
+  stockAction: 'RESTORE_TO_INVENTORY' | 'SCRAP_DAMAGE_EXPENSE' | 'PRICE_ADJUSTMENT_ONLY';
+  kraControlCode?: string;
+  issuedBy: string; // Accountant name
+  journalEntryNumber?: string;
+  items: Array<{
+    productId?: string;
+    sku?: string;
+    productName: string;
+    quantity: number;
+    unitPriceKes: number;
+    totalAmountKes: number;
+  }>;
+  createdAt: string;
 }
 
 export type WebsiteDeliveryOrderStatus =

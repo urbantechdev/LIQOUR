@@ -23,6 +23,10 @@ import {
 import { useErp } from '../../context/ErpContext';
 import { formatKes } from '../../utils/kenyaTax';
 import {
+  syncProductScannedToFirebase,
+  syncDocumentToFirebase
+} from '../../utils/firebaseSyncEngine';
+import {
   Barcode,
   Camera,
   CheckCircle2,
@@ -531,6 +535,8 @@ export const StockAuditSessionPanel: React.FC = () => {
         }
       }
 
+      void syncDocumentToFirebase('STOCK_AUDIT', sessionId, newSession as any);
+
       showNotice(
         `Step 1 Complete: Initialized Stock Audit Session ${sessionId} for ${selectedAuditBranch.name}. Snapshotted ${Object.keys(baselineMap).length} SKUs (${totalExpected} expected bottles) from baseline.`
       );
@@ -573,6 +579,18 @@ export const StockAuditSessionPanel: React.FC = () => {
       );
       return;
     }
+
+    void syncProductScannedToFirebase(matchedProduct, {
+      branchId: activeSession.branchId,
+      branchName: activeSession.branchName,
+      scanType: 'INVENTORY_AUDIT',
+      barcode: cleanCode,
+      sku: matchedProduct.sku,
+      scannerUserId: currentUser.id,
+      scannerName: currentUser.name,
+      bottlesCount: incrementBy,
+      mode: 'RAPID_AUDIT_SCAN'
+    });
 
     const targetSku = matchedProduct.sku;
     const currentMap: Record<string, AuditSkuEntry> = { ...sessionItemsMap };
@@ -947,6 +965,13 @@ export const StockAuditSessionPanel: React.FC = () => {
           }
         }
       }
+
+      void syncDocumentToFirebase('STOCK_AUDIT', activeSession.id, {
+        ...activeSession,
+        status: 'APPROVED',
+        approvedAt: nowIso,
+        approvedBy: approverLabel
+      } as any);
 
       // 4. Synchronize ERP live branch inventory state to match physical counts
       applyApprovedStockAuditToBranch(activeSession.branchId, localAdjustments);

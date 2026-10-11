@@ -3,6 +3,7 @@ import { useErp } from '../../context/ErpContext';
 import { getAuthHeaders } from '../../utils/apiAuth';
 import { Product, StockCategory, HeldCart } from '../../types';
 import { formatKes } from '../../utils/kenyaTax';
+import { syncProductScannedToFirebase } from '../../utils/firebaseSyncEngine';
 import { 
   Search, 
   Barcode, 
@@ -743,6 +744,18 @@ export const PosTerminal: React.FC = () => {
       // Add directly to active checkout cart
       addToCart(matchedProd, qtyToAdd, 0);
       playBeep(1200, 70);
+
+      // Real-time synchronization to Firebase (updates scan history and product scan stats)
+      void syncProductScannedToFirebase(matchedProd, {
+        branchId: activeBranch.id,
+        branchName: activeBranch.name,
+        scanType: isCaseScan ? 'CASE_BOX' : 'SINGLE_BOTTLE',
+        barcode: code,
+        sku: matchedProd.sku,
+        scannerUserId: currentUser.id,
+        scannerName: currentUser.name,
+        mode: 'POS_CHECKOUT'
+      });
 
       const remainingAfterCart = stock > 0 ? Math.max(0, stock - (existingInCart + qtyToAdd)) : 0;
       showSuccessFeedback(

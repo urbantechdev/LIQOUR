@@ -5,6 +5,7 @@ import {
   Unsubscribe
 } from 'firebase/firestore';
 import { getAuthHeaders } from './apiAuth';
+import { syncUserToFirebase } from './firebaseSyncEngine';
 import {
   db,
   OperationType,
@@ -459,6 +460,14 @@ export async function pushStaffRecordToFirestore(record: StaffDirectoryRecord): 
     });
     if (res.ok) {
       lastPushedStaffSignatureById.set(safeId, sig);
+      void syncUserToFirebase({
+        id: safeId,
+        name: cleanDoc.name,
+        email: (cleanDoc as any).email || `${safeId}@vaairo.co.ke`,
+        role: (cleanDoc as any).roleTitle || 'STAFF',
+        department: cleanDoc.department,
+        branchId: cleanDoc.branchId
+      });
     }
     return res.ok;
   } catch (error) {

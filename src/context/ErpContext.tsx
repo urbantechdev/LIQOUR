@@ -156,6 +156,12 @@ import {
   markRemoteUnifiedStateReceived
 } from '../utils/unifiedErpDatabase';
 import { getAuthHeaders, setStoredSessionToken, getStoredSessionToken } from '../utils/apiAuth';
+import {
+  syncUserToFirebase,
+  syncProductCreatedToFirebase,
+  syncProductScannedToFirebase,
+  syncDocumentToFirebase
+} from '../utils/firebaseSyncEngine';
 
 export interface CartItem {
   product: Product;
@@ -1104,6 +1110,13 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       })
     );
   }, [orders, websiteDeliveryOrders, setConsumers]);
+
+  // Real-time synchronization of active user profile to Firebase
+  useEffect(() => {
+    if (currentUser && currentUser.id) {
+      void syncUserToFirebase(currentUser);
+    }
+  }, [currentUser]);
 
   const merchants = React.useMemo(
     () => organizations.filter((o): o is Merchant => o.type === 'MERCHANT'),
@@ -4305,6 +4318,18 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // If accepted, update inventory on hand for active branch and move activated product to the top
     if (result.success && result.product && result.unpackedBottles) {
+      void syncProductScannedToFirebase(result.product, {
+        branchId: activeBranchId,
+        branchName: activeBranch.name,
+        scanType: result.scanType || 'SINGLE_BOTTLE',
+        barcode: rawBarcode,
+        sku: result.product.sku,
+        scannerUserId: currentUser.id,
+        scannerName: currentUser.name,
+        bottlesCount: result.unpackedBottles,
+        mode
+      });
+
       setProducts(prev => [
         result.product!,
         ...prev.filter(p => p.id !== result.product!.id)
@@ -4539,6 +4564,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: `prod-${prodData.category.toLowerCase()}-${Date.now().toString().slice(-5)}`
     };
     setProducts(prev => [newProduct, ...prev]);
+    void syncProductCreatedToFirebase(newProduct);
 
     const packSize = Math.max(1, prodData.packSize || 12);
     const initialBottles = Math.max(0, initialCases) * packSize;
@@ -4604,6 +4630,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setProducts(prev => prev.map(p => (p.id === productId ? updatedProduct : p)));
+    void syncProductCreatedToFirebase(updatedProduct);
 
     // Sync active POS cart if product is currently in cart
     setCart(prev =>
@@ -5864,6 +5891,8 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setOrders(prev => [newOrder, ...prev]);
     setEtimsInvoices(prev => [newInvoice, ...prev]);
+    void syncDocumentToFirebase('ORDER', newOrder.id, newOrder as any);
+    void syncDocumentToFirebase('ETIMS', newInvoice.id, newInvoice as any);
     setLastCompletedInvoice(newInvoice);
     clearCart();
 
@@ -6476,6 +6505,9 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
     setOrders(prev => [newSaleOrder, ...prev]);
     setEtimsInvoices(prev => [newInvoice, ...prev]);
+    void syncDocumentToFirebase('ORDER', newSaleOrder.id, newSaleOrder as any);
+    void syncDocumentToFirebase('ETIMS', newInvoice.id, newInvoice as any);
+    void syncDocumentToFirebase('WEBSITE_ORDER', updatedWebOrder.id, updatedWebOrder as any);
     setLastCompletedInvoice(newInvoice);
 
     // Automatically dispatch Purchase Successful & Official KRA eTIMS Fiscal Receipt Email
@@ -6783,6 +6815,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         currentUser.name || 'SUPPLY-INVOICE',
         true
       );
+      void syncDocumentToFirebase('SUPPLY_INVOICE', newInvoice.id, newInvoice as any);
       return nextInvoices;
     });
 
@@ -6908,6 +6941,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     setProducts(prev => [...createdProducts, ...prev]);
+    createdProducts.forEach(p => void syncProductCreatedToFirebase(p));
     setInventoryItems(prev => [...newInventoryEntries, ...prev]);
 
     const addedSubtotal = addedInvoiceItems.reduce((s, i) => s + i.totalCostKes, 0);
@@ -6923,6 +6957,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setSupplyInvoices(prev => prev.map(inv => (inv.id === invoiceId ? updatedInvoice : inv)));
+    void syncDocumentToFirebase('SUPPLY_INVOICE', updatedInvoice.id, updatedInvoice as any);
 
     if (addedTotal > 0) {
       setSuppliers(prev =>
@@ -7438,6 +7473,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       quoteNumber
     };
     setQuotes(prev => [newQuote, ...prev]);
+    void syncDocumentToFirebase('QUOTE', newQuote.id, newQuote as any);
     return newQuote;
   };
 
@@ -7521,6 +7557,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setJournalEntries(prev => [newJE, ...prev]);
     setCommercialInvoices(prev => [newInvoice, ...prev]);
+    void syncDocumentToFirebase('COMMERCIAL_INVOICE', newInvoice.id, newInvoice as any);
 
     // Wire B2B Invoice into Chart of Accounts (Revenue 4010 & Output VAT 2020) and VAT Registry
     setChartOfAccounts(prev =>
@@ -7552,6 +7589,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       transmissionStatus: 'VERIFIED'
     };
     setEtimsInvoices(prev => [b2bEtims, ...prev]);
+    void syncDocumentToFirebase('ETIMS', b2bEtims.id, b2bEtims as any);
 
     return newInvoice;
   };
@@ -7615,6 +7653,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setJournalEntries(prev => [newJE, ...prev]);
     setCommercialInvoices(prev => [newInvoice, ...prev]);
+    void syncDocumentToFirebase('COMMERCIAL_INVOICE', newInvoice.id, newInvoice as any);
 
     // Wire B2B Invoice into Chart of Accounts (Revenue 4010 & Output VAT 2020) and VAT Registry
     setChartOfAccounts(prev =>
@@ -7646,6 +7685,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       transmissionStatus: 'VERIFIED'
     };
     setEtimsInvoices(prev => [b2bEtims, ...prev]);
+    void syncDocumentToFirebase('ETIMS', b2bEtims.id, b2bEtims as any);
 
     return newInvoice;
   };

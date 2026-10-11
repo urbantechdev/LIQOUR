@@ -3180,7 +3180,8 @@ export class FirestoreAuthoritativeStore {
       documentType === 'QUOTE' ? 'commercialQuotes' :
       documentType === 'STOCK_TRANSFER' ? 'stockTransfers' :
       documentType === 'PURCHASE_ORDER' ? 'purchaseOrders' :
-      documentType === 'STOCK_AUDIT' ? 'stockAuditSessions' : 'documents';
+      documentType === 'STOCK_AUDIT' ? 'stockAuditSessions' :
+      documentType === 'CREDIT_NOTE' ? 'creditNotes' : 'documents';
 
     if (this.enabled) {
       try {

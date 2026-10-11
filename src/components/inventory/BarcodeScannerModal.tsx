@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useErp } from '../../context/ErpContext';
 import { Product } from '../../types';
 import { formatKes } from '../../utils/kenyaTax';
+import { syncProductScannedToFirebase } from '../../utils/firebaseSyncEngine';
 import { ProductImage } from '../common/ProductImage';
 import {
   Camera,
@@ -174,6 +175,15 @@ export const BarcodeScannerModal: React.FC<Props> = ({
       const qtyToAdd = isCaseScan ? matched.packSize || 12 : 1;
 
       playBeep(false);
+      void syncProductScannedToFirebase(matched, {
+        branchId: activeBranch.id,
+        branchName: activeBranch.name,
+        scanType: isCaseScan ? 'CASE_BOX' : 'SINGLE_BOTTLE',
+        barcode: clean,
+        sku: matched.sku,
+        mode: 'POS_SELL'
+      });
+
       if (onPosProductScanned) {
         onPosProductScanned(matched, qtyToAdd, clean);
       } else {
@@ -200,6 +210,15 @@ export const BarcodeScannerModal: React.FC<Props> = ({
     const res = handleBarcodeScan(clean, scanMode);
     if (res.success && res.product) {
       playBeep(false);
+      void syncProductScannedToFirebase(res.product, {
+        branchId: activeBranch.id,
+        branchName: activeBranch.name,
+        scanType: res.scanType || (scanMode === 'BULK' ? 'CASE_BOX' : 'SINGLE_BOTTLE'),
+        barcode: clean,
+        sku: res.product.sku,
+        bottlesCount: res.unpackedBottles,
+        mode: scanMode
+      });
       setScanFeedback({
         ok: true,
         title: `Added +${res.unpackedBottles} Bottles to Stock`,

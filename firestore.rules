@@ -658,6 +658,65 @@ service cloud.firestore {
     }
 
     // -------------------------------------------------------------------------
+    // 8B. AUDIT SCAN HISTORY & ENTERPRISE DOCUMENTS
+    // -------------------------------------------------------------------------
+    match /scanHistory/{scanId} {
+      allow get: if isValidId(scanId) && (isAdmin() || isAuthenticated());
+      allow list: if isAdmin() || isAuthenticated();
+      allow create: if isValidId(scanId) && (isAdmin() || isAuthenticated());
+      allow update, delete: if isAdmin() && isValidId(scanId);
+    }
+
+    match /etimsInvoices/{docId} {
+      allow get: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
+      allow list: if isAdmin() || isAccountant() || isAuthenticated();
+      allow create, update: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
+      allow delete: if isAdmin() && isValidId(docId);
+    }
+
+    match /commercialInvoices/{docId} {
+      allow get: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
+      allow list: if isAdmin() || isAccountant() || isAuthenticated();
+      allow create, update: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
+      allow delete: if isAdmin() && isValidId(docId);
+    }
+
+    match /supplyInvoices/{docId} {
+      allow get: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
+      allow list: if isAdmin() || isAccountant() || isAuthenticated();
+      allow create, update: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
+      allow delete: if isAdmin() && isValidId(docId);
+    }
+
+    match /commercialQuotes/{docId} {
+      allow get: if isValidId(docId) && (isAdmin() || isAuthenticated());
+      allow list: if isAdmin() || isAuthenticated();
+      allow create, update: if isValidId(docId) && (isAdmin() || isAuthenticated());
+      allow delete: if isAdmin() && isValidId(docId);
+    }
+
+    match /purchaseOrders/{docId} {
+      allow get: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
+      allow list: if isAdmin() || isAccountant() || isAuthenticated();
+      allow create, update: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
+      allow delete: if isAdmin() && isValidId(docId);
+    }
+
+    match /creditNotes/{docId} {
+      allow get: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
+      allow list: if isAdmin() || isAccountant() || isAuthenticated();
+      allow create, update: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
+      allow delete: if isAdmin() && isValidId(docId);
+    }
+
+    match /documents/{docId} {
+      allow get: if isValidId(docId) && (isAdmin() || isAuthenticated());
+      allow list: if isAdmin() || isAuthenticated();
+      allow create, update: if isValidId(docId) && (isAdmin() || isAuthenticated());
+      allow delete: if isAdmin() && isValidId(docId);
+    }
+
+    // -------------------------------------------------------------------------
     // 9. PERSISTENT TRANSACTION IDEMPOTENCY KEYS (idempotencyKeys/{scope}_{key})
     // -------------------------------------------------------------------------
     match /idempotencyKeys/{idempotencyId} {
