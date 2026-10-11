@@ -50,18 +50,59 @@ export const INITIAL_USERS: User[] = [
   {
     id: 'user-admin',
     name: 'System Administrator',
-    email: 'zamodasports@gmail.com',
+    email: 'gduniversalstudio@gmail.com',
     role: 'SUPER_ADMIN',
     department: 'BRANCH_MANAGER',
     branchId: 'branch-hq-main',
-    phone: '+254 722 000 000',
+    phone: '',
     mfaEnabled: true
   }
 ];
 
-export const INITIAL_AFFILIATES: Affiliate[] = [];
+export const INITIAL_AFFILIATES: Affiliate[] = [
+  {
+    id: 'aff-rep-01',
+    name: 'Grace Muthoni',
+    code: 'REP-01',
+    phone: '+254 722 000 111',
+    mpesaNumber: '+254 722 000 111',
+    branchId: 'branch-hq-main',
+    commissionRatePercent: 5,
+    commissionMode: 'COMMISSION_AND_PROFIT',
+    allowPreferredPrice: true,
+    active: true,
+    loginPin: '654321',
+    customSlug: 'grace-muthoni',
+    totalSalesKes: 0,
+    totalCommissionEarnedKes: 0,
+    paidCommissionKes: 0,
+    pendingCommissionKes: 0,
+    preferredPrices: {}
+  }
+];
 
-export const INITIAL_EMPLOYEES: Employee[] = [];
+export const INITIAL_EMPLOYEES: Employee[] = [
+  {
+    id: 'emp-cashier-01',
+    employeeNumber: 'CSH-001',
+    name: 'Jane Wanjiku',
+    roleTitle: 'Counter Cashier',
+    department: 'POS',
+    branchId: 'branch-hq-main',
+    basicSalaryKes: 35000,
+    houseAllowanceKes: 5000,
+    transportAllowanceKes: 3000,
+    mPesaNumber: '254712345678',
+    kraPin: 'A012345678Z',
+    nssfNumber: '123456789',
+    nhifShifNumber: '987654321',
+    bankAccount: '1234567890',
+    bankName: 'KCB Bank',
+    active: true,
+    loginPin: '123456',
+    employmentType: 'SALARIED'
+  }
+];
 
 export const INITIAL_CHART_OF_ACCOUNTS: ChartAccount[] = [
   { code: '1010', name: 'Cash on Hand - Retail Tills', type: 'ASSET', balanceKes: 0, kraTaxMappable: false },

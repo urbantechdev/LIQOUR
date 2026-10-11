@@ -194,11 +194,8 @@ const ErpDashboard: React.FC = () => {
           {/* Dynamic Module View with Strict RBAC Route Guard */}
           <main className="flex-1 min-w-0 p-3 pt-7 pb-32 sm:p-6 sm:pt-10 md:pb-10 lg:p-8 lg:pt-10">
             <div className="max-w-7xl mx-auto">
-              {/* Universal Statement Generator + Live User Activity, Login & Device Monitor on EVERY Dashboard (Moved to Sidebar for Affiliate users on POS) */}
-              {!(
-                effectiveActiveTab === 'POS' &&
-                (isSalesLadyLogin || currentDepartment === 'AFFILIATES' || posStationMode === 'SALES_LADY')
-              ) && <UniversalDashboardCommandBar activeTab={effectiveActiveTab} />}
+              {/* Universal Statement Generator + Live User Activity, Login & Device Monitor on EVERY Dashboard (Hidden on POS for clean retail register) */}
+              {effectiveActiveTab !== 'POS' && <UniversalDashboardCommandBar activeTab={effectiveActiveTab} />}
 
               {isSalesLadyLogin ? (
                 <PosTerminal />

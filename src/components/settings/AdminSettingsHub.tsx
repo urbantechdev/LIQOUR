@@ -72,12 +72,28 @@ export const AdminSettingsHub: React.FC = () => {
     deleteMarketingCampaign,
     promotions,
     savePromotion,
-    deletePromotion
+    deletePromotion,
+    cleanAllSalesData,
+    orders
   } = useErp();
 
   const [activeSubTab, setActiveSubTab] = useState<SettingsSectionTab>('PRICING_CSV_MANUAL');
   const [isHeroMenuOpen, setIsHeroMenuOpen] = useState(false);
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
+  const [isCleaningSales, setIsCleaningSales] = useState<boolean>(false);
+  const [confirmCleanSales, setConfirmCleanSales] = useState<boolean>(false);
+
+  const handleCleanSales = async () => {
+    setIsCleaningSales(true);
+    const res = await cleanAllSalesData();
+    setIsCleaningSales(false);
+    setConfirmCleanSales(false);
+    if (res.success) {
+      showFeedback(res.message);
+    } else {
+      showFeedback(`Error cleaning sales: ${res.message}`);
+    }
+  };
 
   // TOTP (2FA) Server Enrollment & Status State
   const [totpEnabled, setTotpEnabled] = useState<boolean>(false);
@@ -2772,6 +2788,67 @@ export const AdminSettingsHub: React.FC = () => {
                   onChange={e => updateSystemSettings({ receiptFooterMessage: e.target.value })}
                   className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs"
                 />
+              </div>
+            </div>
+          </div>
+
+          {/* SALES & ORDERS TRANSACTION DATA CLEANUP */}
+          <div className="p-5 sm:p-6 rounded-2xl bg-rose-50/80 border border-rose-200/90 shadow-2xs space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="font-montserrat font-black text-sm sm:text-base text-rose-950">
+                    Sales &amp; Transaction Ledger Data Cleanup
+                  </h4>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-rose-200 text-rose-900">
+                    {orders.length} Active Orders
+                  </span>
+                </div>
+                <p className="text-xs text-rose-700 mt-1 max-w-2xl leading-relaxed">
+                  Permanently purge all sales orders, POS receipts, E-TIMS invoices, and payment records from the system. Product catalog definitions, branches, and staff profiles remain completely intact.
+                </p>
+              </div>
+
+              <div className="shrink-0">
+                {!confirmCleanSales ? (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmCleanSales(true)}
+                    className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-montserrat font-black text-xs flex items-center gap-2 shadow-sm transition cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Clean All Sales Data</span>
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={isCleaningSales}
+                      onClick={handleCleanSales}
+                      className="px-4 py-2.5 rounded-xl bg-red-700 hover:bg-red-800 text-white font-montserrat font-black text-xs flex items-center gap-2 shadow-sm transition cursor-pointer disabled:opacity-50"
+                    >
+                      {isCleaningSales ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Cleaning...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 className="w-4 h-4" />
+                          <span>Confirm Permanent Clean</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isCleaningSales}
+                      onClick={() => setConfirmCleanSales(false)}
+                      className="px-3 py-2.5 rounded-xl bg-white border border-rose-300 text-slate-700 font-bold text-xs hover:bg-rose-50 transition cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

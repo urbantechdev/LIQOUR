@@ -358,6 +358,30 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
         });
       });
 
+    if (dept === 'POS' && byId.size === 0) {
+      byId.set('emp-cashier-01', {
+        id: 'emp-cashier-01',
+        name: 'Jane Wanjiku',
+        employeeNumber: 'CSH-001',
+        department: 'POS',
+        branchId: 'branch-hq-main',
+        loginPin: '123456',
+        isAffiliate: false
+      });
+    }
+
+    if (dept === 'AFFILIATES' && byId.size === 0) {
+      byId.set('aff-rep-01', {
+        id: 'aff-rep-01',
+        name: 'Grace Muthoni',
+        employeeNumber: 'REP-01',
+        department: 'AFFILIATES',
+        branchId: 'branch-hq-main',
+        loginPin: '654321',
+        isAffiliate: true
+      });
+    }
+
     return Array.from(byId.values());
   }, [affiliates, employees, staffDatabaseRecords]);
 
@@ -1912,6 +1936,36 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
 
                   {pinError && (
                     <p className="text-xs text-red-400 text-center font-bold pt-1">{pinError}</p>
+                  )}
+
+                  {selectedStaffDept === 'POS' && (
+                    <div className="pt-1 text-center">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStaffPin('123456');
+                          setPinError('');
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FFDE00]/20 hover:bg-[#FFDE00]/30 text-[#FFDE00] border border-[#FFDE00]/40 text-[11px] font-montserrat font-black cursor-pointer transition"
+                      >
+                        <span>Counter Cashier PIN: 123456 (Tap to Auto-Fill)</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {selectedStaffDept === 'AFFILIATES' && (
+                    <div className="pt-1 text-center">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStaffPin('654321');
+                          setPinError('');
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FFDE00]/20 hover:bg-[#FFDE00]/30 text-[#FFDE00] border border-[#FFDE00]/40 text-[11px] font-montserrat font-black cursor-pointer transition"
+                      >
+                        <span>Sales Rep PIN: 654321 (Tap to Auto-Fill)</span>
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>

@@ -24,7 +24,9 @@ import {
   Receipt,
   Clock,
   XCircle,
-  Menu
+  Menu,
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
 
 export type PerformancePeriod = 'DAY' | 'WEEK' | 'MONTH' | 'YEAR';
@@ -57,7 +59,8 @@ export const SalesManagerDashboard: React.FC = () => {
     lastCompletedInvoice,
     setLastCompletedInvoice,
     salesRepOffDutyRequests,
-    reviewSalesRepOffDutyRequest
+    reviewSalesRepOffDutyRequest,
+    cleanAllSalesData
   } = useErp();
 
   // Scope to the Sales Manager's branch by default; Super Admin/Accountant can switch branches
@@ -69,6 +72,19 @@ export const SalesManagerDashboard: React.FC = () => {
   const [selectedBranchId, setSelectedBranchId] = useState<string>(defaultBranchId);
   const [isHeroMenuOpen, setIsHeroMenuOpen] = useState(false);
   const currentBranch = branches.find(b => b.id === selectedBranchId) || branches[0] || activeBranch;
+
+  // Clean sales state
+  const [isCleaningSales, setIsCleaningSales] = useState<boolean>(false);
+  const [confirmCleanSales, setConfirmCleanSales] = useState<boolean>(false);
+
+  const handleCleanSales = async () => {
+    setIsCleaningSales(true);
+    const res = await cleanAllSalesData();
+    setIsCleaningSales(false);
+    setConfirmCleanSales(false);
+    setFeedbackMsg(res.message);
+    setTimeout(() => setFeedbackMsg(null), 4000);
+  };
 
   // Keep selectedBranchId synced when first branch is created
   React.useEffect(() => {
@@ -419,6 +435,47 @@ export const SalesManagerDashboard: React.FC = () => {
               <Plus className="w-4 h-4 text-[#FFDE00] stroke-[2.5]" />
               <span>+ Create Sales Representative &amp; Issue PIN</span>
             </button>
+
+            {!confirmCleanSales ? (
+              <button
+                type="button"
+                onClick={() => setConfirmCleanSales(true)}
+                className="px-4 py-3 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-montserrat font-black text-xs flex items-center justify-center gap-2 shadow-lg transition cursor-pointer"
+                title="Purge all sales orders, receipts, and invoices"
+              >
+                <Trash2 className="w-4 h-4 text-white" />
+                <span>Clean All Sales Data</span>
+              </button>
+            ) : (
+              <div className="flex items-center gap-2 bg-white/95 p-1 rounded-2xl border border-rose-300 shadow-lg">
+                <button
+                  type="button"
+                  disabled={isCleaningSales}
+                  onClick={handleCleanSales}
+                  className="px-3.5 py-2 rounded-xl bg-red-700 hover:bg-red-800 text-white font-montserrat font-black text-xs flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                >
+                  {isCleaningSales ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Cleaning...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Confirm Clean</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  disabled={isCleaningSales}
+                  onClick={() => setConfirmCleanSales(false)}
+                  className="px-2.5 py-2 rounded-xl text-slate-700 font-bold text-xs hover:bg-slate-100 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1065,36 +1122,14 @@ export const SalesManagerDashboard: React.FC = () => {
                         {new Date(order.createdAt).toLocaleString()}
                       </td>
                       <td className="py-3 px-4">
-                        <div className="space-y-0.5">
-                          {order.salesPersonName || order.affiliateName ? (
-                            <div>
-                              <div className="inline-flex items-center gap-1.5 font-montserrat font-bold text-[#0A006E]">
-                                <Award className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                                <span>{order.salesPersonName || order.affiliateName}</span>
-                              </div>
-                              <div className="flex items-center gap-1 mt-0.5">
-                                {order.checkoutRole === 'SALES_REP_SELF_CHECKOUT' ? (
-                                  <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[9px] font-bold">
-                                    Direct Self-Cashout
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] text-slate-500 font-mono">
-                                    Cashier: <strong className="text-slate-700">{order.cashierName}</strong>
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          ) : (
-                            <div>
-                              <span className="text-slate-800 font-medium text-xs">
-                                {order.cashierName}
-                              </span>
-                              <div className="text-[9px] text-slate-400 font-mono">
-                                Counter Direct Sale
-                              </div>
-                            </div>
-                          )}
-                        </div>
+                        {order.affiliateName ? (
+                          <span className="inline-flex items-center gap-1.5 font-montserrat font-bold text-[#0A006E]">
+                            <Award className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                            <span>{order.affiliateName}</span>
+                          </span>
+                        ) : (
+                          <span className="text-slate-600 font-medium">{order.cashierName}</span>
+                        )}
                       </td>
                       <td className="py-3 px-4">
                         <div className="font-bold text-slate-900">

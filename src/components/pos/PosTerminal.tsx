@@ -65,6 +65,20 @@ import {
   detectKenyanMobileCarrier,
   sanitizeAndControlKenyanMobileInput
 } from '../../utils/kenyanMobileCarrier';
+import { CashierRegisterView } from './CashierRegisterView';
+import { CatalogLookupDrawer } from './CatalogLookupDrawer';
+
+const QUICK_POS_SCAN_SAMPLES = [
+  { label: 'Johnnie Walker Black 750ml', code: '0500029912303', price: '4,500' },
+  { label: 'Johnnie Walker Red 750ml', code: '5000267014005', price: '2,600' },
+  { label: 'Tusker Lager 6-Pk', code: '6161101601016', price: '1,500' },
+  { label: 'Smirnoff Vodka 750ml', code: '6161101600316', price: '1,599' },
+  { label: 'Hennessy VS 700ml', code: '3245990250203', price: '5,999' },
+  { label: 'Jameson Irish 750ml', code: '5011007003234', price: '3,500' },
+  { label: 'White Cap Lager 500ml', code: '6161101602013', price: '280' },
+  { label: 'Gilbeys Gin 750ml', code: '6161101600101', price: '1,450' },
+  { label: 'Jack Daniel\'s 700ml', code: '5099873042212', price: '3,800' },
+];
 
 interface ShiftDrawerState {
   isOpen: boolean;
@@ -84,8 +98,6 @@ export const PosTerminal: React.FC = () => {
     cart, 
     selectedAffiliate,
     setSelectedAffiliate,
-    recalledSalesPerson,
-    setRecalledSalesPerson,
     addToCart, 
     removeFromCart, 
     updateCartItemQty, 
@@ -132,6 +144,9 @@ export const PosTerminal: React.FC = () => {
   const [printingQueueTicket, setPrintingQueueTicket] = useState<HeldCart | null>(null);
   const [selectedWorkingCashierId, setSelectedWorkingCashierId] = useState<string>('');
   const [counterCashierSaleMode, setCounterCashierSaleMode] = useState<'DIRECT_SALE' | 'RECEIVE_REP_ORDERS'>('DIRECT_SALE');
+  // Cashier View: 'REGISTER' (Clean Retail POS waiting for items in the middle) vs 'CATALOG'
+  const [cashierViewMode, setCashierViewMode] = useState<'REGISTER' | 'CATALOG'>('REGISTER');
+  const [isCatalogDrawerOpen, setIsCatalogDrawerOpen] = useState(false);
   const [showAllBranchRepOrders, setShowAllBranchRepOrders] = useState<boolean>(true);
   const [filterRepIdForOrders, setFilterRepIdForOrders] = useState<string>('ALL');
   const [isRepHistoryModalOpen, setIsRepHistoryModalOpen] = useState(false);
@@ -147,9 +162,12 @@ export const PosTerminal: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<StockCategory | 'ALL'>('ALL');
   const [selectedSubCategory, setSelectedSubCategory] = useState<string>('ALL');
   const [barcodeInput, setBarcodeInput] = useState('');
+  const [checkoutBarcodeInput, setCheckoutBarcodeInput] = useState('');
   const [barcodeFeedback, setBarcodeFeedback] = useState<string | null>(null);
+  const [justScannedProductId, setJustScannedProductId] = useState<string | null>(null);
   const [awaitingNextPosScan, setAwaitingNextPosScan] = useState(false);
   const posBarcodeInputRef = useRef<HTMLInputElement | null>(null);
+  const checkoutBarcodeInputRef = useRef<HTMLInputElement | null>(null);
   const [centerFeedback, setCenterFeedback] = useState<CenterScreenFeedbackData | null>(null);
 
   const showSuccessFeedback = useCallback((title: string, message?: string, subtext?: string) => {
@@ -651,26 +669,68 @@ export const PosTerminal: React.FC = () => {
     };
   }, [handleKickDrawer, isPosCashier]);
 
-  // Handle quick barcode enter with smart auto-pinning to exact product
-  const handleBarcodeSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (awaitingNextPosScan) return;
-    const raw = barcodeInput.trim();
-    if (!raw) return;
+  // Comprehensive Product Barcode & SKU Resolution Helper
+  const findProductByBarcode = useCallback((rawCode: string): { product: Product; isCaseScan: boolean; qtyToAdd: number } | null => {
+    const clean = rawCode.trim();
+    if (!clean) return null;
+    const cleanLower = clean.toLowerCase();
+    const alphanumericOnly = clean.replace(/[^a-zA-Z0-9-]/g, '');
+    const digitsOnly = clean.replace(/\D/g, '');
 
-    const matchedProd = products.find(
-      p =>
-        p.barcode === raw ||
-        p.caseBarcode === raw ||
-        p.sku.toLowerCase() === raw.toLowerCase() ||
-        (raw.length === 14 && raw.startsWith('1') && p.barcode === raw.substring(1))
-    );
+    // 1. Direct barcode match
+    let p = products.find(prod => prod.barcode === clean || prod.barcode === alphanumericOnly || (digitsOnly && prod.barcode === digitsOnly));
+    if (p) return { product: p, isCaseScan: false, qtyToAdd: 1 };
 
-    if (matchedProd) {
-      const isCaseScan =
-        matchedProd.caseBarcode === raw ||
-        (raw.length === 14 && raw.startsWith('1') && matchedProd.barcode === raw.substring(1));
-      const qtyToAdd = isCaseScan ? matchedProd.packSize || 12 : 1;
+    // 2. Direct caseBarcode match
+    p = products.find(prod => prod.caseBarcode === clean || prod.caseBarcode === alphanumericOnly || (digitsOnly && prod.caseBarcode === digitsOnly));
+    if (p) return { product: p, isCaseScan: true, qtyToAdd: p.packSize || 12 };
+
+    // 3. Exact SKU match
+    p = products.find(prod => prod.sku.toLowerCase() === cleanLower || prod.sku.toLowerCase() === alphanumericOnly.toLowerCase());
+    if (p) return { product: p, isCaseScan: false, qtyToAdd: 1 };
+
+    // 4. UPC-A (12 digits) vs EAN-13 (13 digits): check with or without leading zero
+    if (clean.length === 12 || digitsOnly.length === 12) {
+      const code12 = digitsOnly.length === 12 ? digitsOnly : clean;
+      const withZero = '0' + code12;
+      p = products.find(prod => prod.barcode === withZero || prod.barcode === code12);
+      if (p) return { product: p, isCaseScan: false, qtyToAdd: 1 };
+    }
+    if ((clean.length === 13 || digitsOnly.length === 13) && (clean.startsWith('0') || digitsOnly.startsWith('0'))) {
+      const code13 = digitsOnly.length === 13 ? digitsOnly : clean;
+      const withoutZero = code13.substring(1);
+      p = products.find(prod => prod.barcode === withoutZero || prod.barcode === code13);
+      if (p) return { product: p, isCaseScan: false, qtyToAdd: 1 };
+    }
+
+    // 5. 14-digit GTIN-14 / ITF-14 case code
+    if (clean.length === 14 || digitsOnly.length === 14) {
+      const code14 = digitsOnly.length === 14 ? digitsOnly : clean;
+      const innerCode = code14.substring(1);
+      p = products.find(prod => prod.barcode === innerCode || ('0' + prod.barcode) === code14 || prod.caseBarcode === code14);
+      if (p) return { product: p, isCaseScan: true, qtyToAdd: p.packSize || 12 };
+    }
+
+    // 6. Direct product ID
+    p = products.find(prod => prod.id === clean || prod.id === cleanLower);
+    if (p) return { product: p, isCaseScan: false, qtyToAdd: 1 };
+
+    // 7. Case-insensitive barcode fallback
+    p = products.find(prod => prod.barcode && prod.barcode.toLowerCase() === cleanLower);
+    if (p) return { product: p, isCaseScan: false, qtyToAdd: 1 };
+
+    return null;
+  }, [products]);
+
+  // Handle scanned barcode (from input box, USB/Bluetooth laser scanner, or quick-test button)
+  const processScannedBarcode = useCallback((raw: string) => {
+    const code = raw.trim();
+    if (!code) return;
+
+    const resolved = findProductByBarcode(code);
+
+    if (resolved) {
+      const { product: matchedProd, isCaseScan, qtyToAdd } = resolved;
       const baseProdId = matchedProd.id.includes('-vol-') ? matchedProd.id.split('-vol-')[0] : matchedProd.id;
       const branchInv = inventoryItems.find(i => i.productId === baseProdId && i.branchId === activeBranch.id);
       const fallbackInv = inventoryItems.find(i => i.productId === baseProdId && i.bottlesOnHand > 0);
@@ -680,51 +740,130 @@ export const PosTerminal: React.FC = () => {
         .filter(c => (c.product.id.includes('-vol-') ? c.product.id.split('-vol-')[0] : c.product.id) === baseProdId)
         .reduce((s, c) => s + c.quantity, 0);
 
-      if (stock <= 0 || existingInCart + qtyToAdd > stock) {
-        setBarcodeFeedback(
-          `⚠️ Insufficient Available Stock for ${matchedProd.name}: ${stock} btls on hand (${existingInCart} already in cart).`
-        );
-        showErrorFeedback(
-          'Insufficient Stock',
-          `${matchedProd.name} only has ${stock} btls on hand`,
-          `Cart has ${existingInCart} already`
-        );
-        playBeep(300, 150);
-      } else {
-        addToCart(matchedProd, qtyToAdd, 0);
-        playBeep(1200, 70);
-        showSuccessFeedback(
-          'Scanned & Added!',
-          `${qtyToAdd} × ${matchedProd.name}`,
-          `Code: ${raw} • Stock left: ${Math.max(0, stock - (existingInCart + qtyToAdd))}`
-        );
-        const remainingAfterCart = Math.max(0, stock - (existingInCart + qtyToAdd));
-        setLastPinnedPosScan({
-          product: matchedProd,
-          scannedCode: raw,
-          isCaseScan,
-          qtyAdded: qtyToAdd,
-          stockOnHand: stock,
-          remainingAfterCart
-        });
-        setBarcodeFeedback(
-          `✓ AUTO-PINNED [${raw}] → ${matchedProd.name} (+${qtyToAdd} btl${qtyToAdd > 1 ? 's' : ''} added to cart • ${remainingAfterCart} btls remaining after sale)`
-        );
-        setBarcodeInput('');
-        setAwaitingNextPosScan(true);
-      }
+      // Add directly to active checkout cart
+      addToCart(matchedProd, qtyToAdd, 0);
+      playBeep(1200, 70);
+
+      const remainingAfterCart = stock > 0 ? Math.max(0, stock - (existingInCart + qtyToAdd)) : 0;
+      showSuccessFeedback(
+        'Scanned & Added!',
+        `${qtyToAdd} × ${matchedProd.name}`,
+        `Barcode: ${code} • ${formatKes(matchedProd.retailPriceKes)}`
+      );
+
+      setLastPinnedPosScan({
+        product: matchedProd,
+        scannedCode: code,
+        isCaseScan,
+        qtyAdded: qtyToAdd,
+        stockOnHand: stock,
+        remainingAfterCart
+      });
+
+      setJustScannedProductId(matchedProd.id);
+      setTimeout(() => setJustScannedProductId(null), 3500);
+
+      setBarcodeFeedback(
+        `✓ Identified [${code}]: ${matchedProd.name} (+${qtyToAdd} ${isCaseScan ? 'case' : 'btl'} added to checkout list • ${formatKes(matchedProd.retailPriceKes)})`
+      );
+      setBarcodeInput('');
+      setCheckoutBarcodeInput('');
+      setAwaitingNextPosScan(false);
+
+      // Keep barcode input focused for instantaneous consecutive scans
+      setTimeout(() => {
+        posBarcodeInputRef.current?.focus();
+        checkoutBarcodeInputRef.current?.focus();
+      }, 40);
     } else {
-      setBarcodeFeedback(`Unknown Barcode: "${raw}". Not pinned to any SKU in catalog.`);
+      setBarcodeFeedback(`Unknown Barcode: "${code}". No matching product in catalog.`);
       showErrorFeedback(
         'Unknown Barcode',
-        `No SKU matches barcode "${raw}"`,
-        'Use Manual Search or Onboard'
+        `No SKU matches barcode "${code}"`,
+        'Use Manual Search or Product Catalog'
       );
       playBeep(250, 200);
+      setBarcodeInput('');
+      setCheckoutBarcodeInput('');
+      setTimeout(() => {
+        posBarcodeInputRef.current?.focus();
+        checkoutBarcodeInputRef.current?.focus();
+      }, 40);
     }
 
-    setTimeout(() => setBarcodeFeedback(null), 5500);
+    setTimeout(() => setBarcodeFeedback(null), 5000);
+  }, [findProductByBarcode, inventoryItems, activeBranch.id, cart, addToCart, playBeep, showSuccessFeedback, showErrorFeedback]);
+
+  // Form submit from physical scanner enter or text input submit
+  const handleBarcodeSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!barcodeInput.trim()) return;
+    processScannedBarcode(barcodeInput);
   };
+
+  const handleCheckoutBarcodeSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!checkoutBarcodeInput.trim()) return;
+    processScannedBarcode(checkoutBarcodeInput);
+  };
+
+  // Hardware Barcode Scanner Global Keyboard Listener (supports USB & Bluetooth handheld laser/CCD scanners)
+  useEffect(() => {
+    let buffer = '';
+    let lastKeyTimestamp = 0;
+    const MAX_SCANNER_INTERVAL_MS = 65; // Barcode scanners stream characters in < 50ms intervals
+
+    const onGlobalKey = (e: KeyboardEvent) => {
+      // Don't intercept if modifier keys are pressed
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      const activeEl = document.activeElement;
+      const isInput =
+        activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement;
+      const isOurBarcodeInput =
+        activeEl === posBarcodeInputRef.current || activeEl === checkoutBarcodeInputRef.current;
+
+      const now = performance.now();
+      const interval = now - lastKeyTimestamp;
+      lastKeyTimestamp = now;
+
+      if (e.key === 'Enter') {
+        if (buffer.length >= 3 && (interval < MAX_SCANNER_INTERVAL_MS * 2.5 || isOurBarcodeInput)) {
+          e.preventDefault();
+          const capturedCode = buffer.trim();
+          buffer = '';
+          processScannedBarcode(capturedCode);
+        } else {
+          buffer = '';
+        }
+        return;
+      }
+
+      // Check if printable character
+      if (e.key.length !== 1) return;
+
+      // Reset buffer if delay was longer than scanner speed (unless typing directly into our barcode input)
+      if (interval > MAX_SCANNER_INTERVAL_MS && buffer.length > 0 && !isOurBarcodeInput) {
+        buffer = '';
+      }
+
+      if (/^[a-zA-Z0-9-]$/.test(e.key)) {
+        buffer += e.key;
+      }
+    };
+
+    window.addEventListener('keydown', onGlobalKey);
+    return () => window.removeEventListener('keydown', onGlobalKey);
+  }, [processScannedBarcode]);
+
+
+  // Auto-focus barcode input on mount so POS is ready to scan immediately
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      posBarcodeInputRef.current?.focus();
+    }, 150);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Branch affiliates & POS Cashiers
   const branchAffiliates = affiliates.filter(a => a.branchId === activeBranch.id);
@@ -1063,32 +1202,6 @@ export const PosTerminal: React.FC = () => {
       }
     }
 
-    // Explicitly wire the relationship between Cashier and Salesperson
-    let saleCashierId = activeCounterCashierId;
-    let saleCashierName = activeCounterCashierName || currentUser.name;
-    let salePersonId: string | undefined = undefined;
-    let salePersonName: string | undefined = undefined;
-    let saleCheckoutRole: 'SALES_REP_SELF_CHECKOUT' | 'COUNTER_CASHIER_DIRECT' | 'COUNTER_CASHIER_REP_RECALL' = 'COUNTER_CASHIER_DIRECT';
-
-    if (posStationMode === 'SALES_LADY') {
-      // 1. SALES PERSON SELF-CHECKOUT: Cashout by themselves without queueing to cashier
-      salePersonId = activeSalesLadyAffiliate?.id || currentUser.id;
-      salePersonName = activeSalesLadyAffiliate?.name || currentUser.name;
-      saleCashierId = currentUser.id;
-      saleCashierName = `${salePersonName} (Direct Self-Checkout)`;
-      saleCheckoutRole = 'SALES_REP_SELF_CHECKOUT';
-    } else {
-      // 2. COUNTER CASHIER CHECKOUT:
-      // Can checkout sales made directly from counter OR checkout orders received from sales reps
-      if (recalledSalesPerson || selectedAffiliate) {
-        salePersonId = recalledSalesPerson?.id || selectedAffiliate?.id;
-        salePersonName = recalledSalesPerson?.name || selectedAffiliate?.name;
-        saleCheckoutRole = 'COUNTER_CASHIER_REP_RECALL';
-      } else {
-        saleCheckoutRole = 'COUNTER_CASHIER_DIRECT';
-      }
-    }
-
     // Fire sale into ERP Context (verifies Daraja transaction via /api/mpesa/verify before committing)
     const res = await completeSale({
       customerName: customerName.trim() || undefined,
@@ -1099,12 +1212,7 @@ export const PosTerminal: React.FC = () => {
       mpesaPhone: customerPhone.trim() || undefined,
       mpesaReceiptNumber: cleanReceipt || undefined,
       checkoutRequestId: resolvedCheckoutRequestId,
-      servedByName: posStationMode === 'SALES_LADY' ? salePersonName : saleCashierName,
-      cashierId: saleCashierId,
-      cashierName: saleCashierName,
-      salesPersonId: salePersonId,
-      salesPersonName: salePersonName,
-      checkoutRole: saleCheckoutRole
+      servedByName: currentUser.name
     });
 
     if (!res.success) {
@@ -1287,7 +1395,11 @@ export const PosTerminal: React.FC = () => {
       if (typeof window !== 'undefined' && window.innerWidth < 1024 && mobilePosTab !== 'CHECKOUT') {
         setMobilePosTab('CHECKOUT');
       }
-      void handleCheckout();
+      if (posStationMode === 'SALES_LADY') {
+        handleSalesLadySubmitToQueue('PAY_ON_COLLECTION');
+      } else {
+        void handleCheckout();
+      }
     };
     window.addEventListener('vaairo:pos-prompt', onBottomNavPrompt);
     window.addEventListener('vaairo:pos-checkout', onBottomNavCheckout);
@@ -1541,7 +1653,81 @@ export const PosTerminal: React.FC = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5">
+      {/* CASHIER WORKSTATION ROUTING: Clean Retail POS Register vs Catalog Grid */}
+      {posStationMode === 'COUNTER_CASHIER' && cashierViewMode === 'REGISTER' ? (
+        <CashierRegisterView
+          cart={cart}
+          addToCart={addToCart}
+          removeFromCart={removeFromCart}
+          updateCartItemQty={updateCartItemQty}
+          clearCart={clearCart}
+          barcodeInput={barcodeInput}
+          setBarcodeInput={setBarcodeInput}
+          handleBarcodeSubmit={handleBarcodeSubmit}
+          posBarcodeInputRef={posBarcodeInputRef}
+          processScannedBarcode={processScannedBarcode}
+          quickScanSamples={QUICK_POS_SCAN_SAMPLES}
+          lastPinnedPosScan={lastPinnedPosScan}
+          setLastPinnedPosScan={setLastPinnedPosScan}
+          justScannedProductId={justScannedProductId}
+          setIsCameraModalOpen={setIsCameraModalOpen}
+          customerName={customerName}
+          setCustomerName={setCustomerName}
+          customerPhone={customerPhone}
+          setCustomerPhone={setCustomerPhone}
+          customerEmail={customerEmail}
+          setCustomerEmail={setCustomerEmail}
+          customerKraPin={customerKraPin}
+          setCustomerKraPin={setCustomerKraPin}
+          paymentMethod={paymentMethod}
+          setPaymentMethod={setPaymentMethod}
+          cashTendered={cashTendered}
+          setCashTendered={setCashTendered}
+          cashChange={cashChange}
+          parsedCashTendered={parsedCashTendered}
+          splitCashAmount={splitCashAmount}
+          setSplitCashAmount={setSplitCashAmount}
+          splitMpesaAmount={splitMpesaAmount}
+          setSplitMpesaAmount={setSplitMpesaAmount}
+          splitRemaining={splitRemaining}
+          cardAuthCode={cardAuthCode}
+          setCardAuthCode={setCardAuthCode}
+          posMpesaReceiptInput={posMpesaReceiptInput}
+          setPosMpesaReceiptInput={setPosMpesaReceiptInput}
+          subtotal={subtotal}
+          totalCartUnits={totalCartUnits}
+          vatAmount={vatAmount}
+          companyBaselineSubtotal={companyBaselineSubtotal}
+          handleCheckout={handleCheckout}
+          handlePutCartOnHold={handlePutCartOnHold}
+          handleOpenPosPrompt={handleOpenPosPrompt}
+          handleSalesLadySubmitToQueue={handleSalesLadySubmitToQueue}
+          checkoutError={checkoutError}
+          isProcessingStk={isProcessingStk}
+          stkStatusMessage={stkStatusMessage}
+          branchHeldCarts={branchHeldCarts}
+          allBranchSalesRepHeldCarts={allBranchSalesRepHeldCarts}
+          isHeldCartsOpen={isHeldCartsOpen}
+          setIsHeldCartsOpen={setIsHeldCartsOpen}
+          handleRecallCart={handleRecallCart}
+          updateHeldCartQueueStatus={updateHeldCartQueueStatus}
+          removeHeldCart={removeHeldCart}
+          setPrintingQueueTicket={setPrintingQueueTicket}
+          handleKickDrawer={handleKickDrawer}
+          openStaffPinPrompt={openStaffPinPrompt}
+          currentUser={currentUser}
+          activeBranch={activeBranch}
+          activeCounterCashierName={activeCounterCashierName}
+          isWarehouse={isWarehouse}
+          isWholesaleStore={isWholesaleStore}
+          minThreshold={minThreshold}
+          products={products}
+          inventoryItems={inventoryItems}
+          onOpenCatalogLookup={() => setIsCatalogDrawerOpen(true)}
+          onSwitchToCatalogView={() => setCashierViewMode('CATALOG')}
+        />
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5">
         
         {/* Left Column: Role Station Bar, Live Counter Order Queue, Product Catalog & Barcode Lookup (7 Cols) */}
         <div className={`lg:col-span-7 space-y-3.5 sm:space-y-4 ${mobilePosTab === 'CHECKOUT' ? 'hidden lg:block' : 'block'}`}>
@@ -1587,8 +1773,9 @@ export const PosTerminal: React.FC = () => {
                   </button>
                 )}
 
-                {/* Station Mode Switcher Pills */}
-                <div className="grid grid-cols-2 sm:inline-flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 w-full sm:w-auto shrink-0">
+                {/* Station Mode Switcher Pills (Hidden when a Sales Representative is strictly logged in as AFFILIATES staff) */}
+                {!(currentRole === 'STAFF' && currentDepartment === 'AFFILIATES') && (
+                  <div className="grid grid-cols-2 sm:inline-flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 w-full sm:w-auto shrink-0">
                     <button
                       type="button"
                       onClick={() => setPosStationMode('COUNTER_CASHIER')}
@@ -1614,48 +1801,62 @@ export const PosTerminal: React.FC = () => {
                       <span>Sales Representative</span>
                     </button>
                   </div>
+                )}
+
+                {posStationMode === 'COUNTER_CASHIER' && (
+                  <button
+                    type="button"
+                    onClick={() => setCashierViewMode('REGISTER')}
+                    className="px-3 py-1.5 rounded-xl bg-[#0A006E] hover:bg-[#060046] text-[#FFDE00] border border-[#0A006E] text-[11px] font-montserrat font-black flex items-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap"
+                  >
+                    <Barcode className="w-3.5 h-3.5" />
+                    <span>Return to Clean Register View</span>
+                  </button>
+                )}
               </div>
             </div>
 
-            {/* Sales Lady Direct Self-Checkout & Optional Counter Queue Bar */}
+            {/* Sales Lady Assigned POS Cashier Selector Bar */}
             {posStationMode === 'SALES_LADY' && (
-              <div className="pt-2.5 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-emerald-50/90 p-3 rounded-xl border border-emerald-300">
-                <div className="text-[11px] font-montserrat font-bold text-slate-800 flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0 animate-pulse" />
+              <div className="pt-2.5 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                <div className="text-[11px] font-montserrat font-bold text-slate-700">
+                  <span className="text-[#0A006E] font-black uppercase">Working Under POS Cashier: </span>
                   <span>
-                    <strong className="text-[#0A006E] font-black uppercase">Direct Self-Checkout Active: </strong>
-                    <span>You can cash out sales directly and issue customer receipts instantly, or optionally queue orders to counter cashier for collection.</span>
+                    Orders you submit go strictly to{' '}
+                    <strong className="text-[#1E9E60]">
+                      {workingUnderCashier?.name ||
+                        activeSalesLadyAffiliate?.assignedCashierName ||
+                        'Assigned POS Cashier'}
+                    </strong>
+                    &apos;s Collection Queue
                   </span>
                 </div>
                 {availablePosCashiers.length > 0 && (
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <span className="text-[10px] text-slate-500 font-semibold">Optional Counter Queue:</span>
-                    <select
-                      value={
-                        workingUnderCashier?.id ||
-                        activeSalesLadyAffiliate?.assignedCashierId ||
-                        ''
+                  <select
+                    value={
+                      workingUnderCashier?.id ||
+                      activeSalesLadyAffiliate?.assignedCashierId ||
+                      ''
+                    }
+                    onChange={(e) => {
+                      const chosen = allPosCashiers.find(c => c.id === e.target.value);
+                      setSelectedWorkingCashierId(e.target.value);
+                      if (chosen && activeSalesLadyAffiliate) {
+                        updateAffiliateAssignedCashier(
+                          activeSalesLadyAffiliate.id,
+                          chosen.id,
+                          chosen.name
+                        );
                       }
-                      onChange={(e) => {
-                        const chosen = allPosCashiers.find(c => c.id === e.target.value);
-                        setSelectedWorkingCashierId(e.target.value);
-                        if (chosen && activeSalesLadyAffiliate) {
-                          updateAffiliateAssignedCashier(
-                            activeSalesLadyAffiliate.id,
-                            chosen.id,
-                            chosen.name
-                          );
-                        }
-                      }}
-                      className="px-2.5 py-1.5 bg-white border border-[#0A006E]/30 rounded-lg text-xs font-montserrat font-bold text-[#0A006E] shrink-0"
-                    >
-                      {availablePosCashiers.map(cashier => (
-                        <option key={cashier.id} value={cashier.id}>
-                          POS Cashier: {cashier.name} ({cashier.employeeNumber})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                    }}
+                    className="px-2.5 py-1.5 bg-white border border-[#0A006E]/30 rounded-lg text-xs font-montserrat font-bold text-[#0A006E] shrink-0"
+                  >
+                    {availablePosCashiers.map(cashier => (
+                      <option key={cashier.id} value={cashier.id}>
+                        POS Cashier: {cashier.name} ({cashier.employeeNumber})
+                      </option>
+                    ))}
+                  </select>
                 )}
               </div>
             )}
@@ -1950,72 +2151,88 @@ export const PosTerminal: React.FC = () => {
           </div>
           
           {/* Quick Barcode Scanner Input & App Search Bar */}
-          <div className={`bg-white p-3.5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-3 ${mobilePosTab === 'QUEUE' ? 'hidden lg:block' : 'block'}`}>
-            {awaitingNextPosScan ? (
-              <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-emerald-50 border-2 border-[#0A006E] animate-in fade-in">
-                <div className="flex items-center gap-2 min-w-0 text-xs font-montserrat font-bold text-[#0A006E]">
-                  <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span className="truncate">
-                    Scan complete ({lastPinnedPosScan?.product.name || 'Item added'}) — Scanner paused to prevent mistaken scan
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
+          <div className={`bg-white p-3.5 sm:p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3 ${mobilePosTab === 'QUEUE' ? 'hidden lg:block' : 'block'}`}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                </span>
+                <span className="text-[11px] font-montserrat font-black text-[#0A006E] uppercase tracking-wide">
+                  Barcode Scanner Ready (USB / Bluetooth / Camera)
+                </span>
+              </div>
+              <span className="text-[10px] font-mono text-slate-400 hidden sm:inline">
+                Aim scanner at bottle &amp; pull trigger
+              </span>
+            </div>
+
+            <form onSubmit={handleBarcodeSubmit} className="flex gap-1.5 sm:gap-2">
+              <div className="relative flex-1">
+                <Barcode className="w-4 h-4 sm:w-5 sm:h-5 text-[#0A006E] absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  ref={posBarcodeInputRef}
+                  type="text"
+                  value={barcodeInput}
+                  onChange={(e) => setBarcodeInput(e.target.value)}
+                  placeholder="Scan bottle barcode (EAN-13 / UPC / Case) or enter SKU..."
+                  autoFocus
+                  className="w-full pl-9 sm:pl-11 pr-8 py-2.5 sm:py-3 bg-slate-50 border-2 border-slate-300 focus:border-[#0A006E] rounded-xl text-xs sm:text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#0A006E]/20 text-slate-900 placeholder:text-slate-400 transition"
+                />
+                {barcodeInput && (
                   <button
                     type="button"
                     onClick={() => {
-                      setAwaitingNextPosScan(false);
                       setBarcodeInput('');
-                      setTimeout(() => posBarcodeInputRef.current?.focus(), 30);
+                      posBarcodeInputRef.current?.focus();
                     }}
-                    className="px-3.5 py-2 bg-[#0A006E] hover:bg-[#060046] text-[#FFDE00] rounded-xl font-montserrat font-black text-xs transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 text-xs"
+                    title="Clear input"
                   >
-                    <Barcode className="w-4 h-4" />
-                    <span>Scan Next Barcode</span>
+                    ✕
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsCameraModalOpen(true)}
-                    className="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 rounded-xl font-montserrat font-bold text-xs border border-slate-200 transition flex items-center gap-1.5 cursor-pointer"
-                    title="Open Camera Barcode Scanner"
-                  >
-                    <Camera className="w-4 h-4 text-[#0A006E]" />
-                    <span className="hidden sm:inline">Camera</span>
-                  </button>
-                </div>
+                )}
               </div>
-            ) : (
-              <form onSubmit={handleBarcodeSubmit} className="flex gap-1.5 sm:gap-2">
-                <div className="relative flex-1">
-                  <Barcode className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    ref={posBarcodeInputRef}
-                    type="text"
-                    value={barcodeInput}
-                    onChange={(e) => setBarcodeInput(e.target.value)}
-                    placeholder="Scan barcode or enter SKU..."
-                    className="w-full pl-9 sm:pl-11 pr-3 py-2.5 sm:py-3 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-[#0A006E] text-slate-800"
-                  />
-                </div>
 
-                {/* Camera Scanner Trigger */}
+              {/* Camera Scanner Trigger */}
+              <button
+                type="button"
+                onClick={() => setIsCameraModalOpen(true)}
+                className="px-3 sm:px-3.5 py-2.5 sm:py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-montserrat font-bold text-xs border border-slate-200 transition flex items-center gap-1.5 shrink-0 cursor-pointer"
+                title="Open Camera Barcode Scanner"
+              >
+                <Camera className="w-4 h-4 text-[#0A006E]" />
+                <span className="hidden sm:inline">Camera</span>
+              </button>
+
+              <button
+                type="submit"
+                className="px-4 sm:px-6 py-2.5 sm:py-3 bg-[#0A006E] hover:bg-[#060046] active:scale-95 text-[#FFDE00] rounded-xl font-montserrat font-black text-xs transition flex items-center gap-1.5 shrink-0 shadow-md cursor-pointer"
+              >
+                <Barcode className="w-4 h-4" />
+                <span>Scan / Add</span>
+              </button>
+            </form>
+
+            {/* Quick-Test Sample Barcode Pills (1-tap simulation of real bottle scans) */}
+            <div className="flex items-center gap-1.5 flex-wrap pt-1">
+              <span className="text-[10px] font-montserrat font-black text-slate-400 uppercase shrink-0">
+                Quick Test Scans:
+              </span>
+              {QUICK_POS_SCAN_SAMPLES.map(item => (
                 <button
+                  key={item.code}
                   type="button"
-                  onClick={() => setIsCameraModalOpen(true)}
-                  className="px-3 sm:px-3.5 py-2.5 sm:py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-montserrat font-bold text-xs border border-slate-200 transition flex items-center gap-1.5 shrink-0"
-                  title="Open Camera Barcode Scanner"
+                  onClick={() => processScannedBarcode(item.code)}
+                  className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-[#FFDE00] text-slate-700 hover:text-[#0A006E] border border-slate-200 hover:border-[#0A006E] text-[10px] font-montserrat font-bold transition flex items-center gap-1 cursor-pointer active:scale-95 shadow-2xs"
+                  title={`Simulate barcode scan: ${item.label} (${item.code})`}
                 >
-                  <Camera className="w-4 h-4 text-[#0A006E]" />
-                  <span className="hidden sm:inline">Camera</span>
+                  <Barcode className="w-3 h-3 shrink-0" />
+                  <span>{item.label}</span>
+                  <span className="font-mono text-[9px] text-emerald-700">KES {item.price}</span>
                 </button>
-
-                <button
-                  type="submit"
-                  className="px-3.5 sm:px-5 py-2.5 sm:py-3 bg-[#0A006E] text-white rounded-xl font-montserrat font-bold text-xs hover:bg-[#060046] transition flex items-center gap-1.5 shrink-0 shadow-sm"
-                >
-                  <span>Add</span>
-                </button>
-              </form>
-            )}
+              ))}
+            </div>
 
             {barcodeFeedback && (
               <div className="text-xs font-medium px-3.5 py-2 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 animate-in fade-in flex items-center gap-2">
@@ -2026,36 +2243,43 @@ export const PosTerminal: React.FC = () => {
 
             {/* Auto-Pinned Barcode Product Verification Card */}
             {lastPinnedPosScan && (
-              <div className="p-3 rounded-xl bg-emerald-950 text-white border-2 border-[#FFDE00] flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+              <div className="p-3.5 rounded-xl bg-[#0A006E] text-white border-2 border-[#FFDE00] flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in shadow-md">
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="px-2.5 py-1.5 rounded-lg bg-[#FFDE00] text-[#0A006E] font-montserrat font-black text-[10px] uppercase shrink-0 text-center">
-                    <div>AUTO-PINNED</div>
-                    <div className="font-mono text-[9px]">{lastPinnedPosScan.isCaseScan ? 'MASTER CASE' : 'SINGLE BTL'}</div>
+                  <div className="w-12 h-12 rounded-xl bg-white p-1 flex items-center justify-center shrink-0 shadow-inner">
+                    <ProductImage product={lastPinnedPosScan.product} size="xs" />
+                  </div>
+                  <div className="px-2.5 py-1.5 rounded-lg bg-[#FFDE00] text-[#0A006E] font-montserrat font-black text-[10px] uppercase shrink-0 text-center shadow-xs">
+                    <div>IDENTIFIED &amp; ADDED</div>
+                    <div className="font-mono text-[9px]">{lastPinnedPosScan.isCaseScan ? 'MASTER CASE' : 'SINGLE BOTTLE'}</div>
                   </div>
                   <div className="min-w-0">
-                    <div className="text-xs font-montserrat font-black text-[#FFDE00] truncate">
+                    <div className="text-xs sm:text-sm font-montserrat font-black text-[#FFDE00] truncate">
                       {lastPinnedPosScan.product.name} ({lastPinnedPosScan.product.volumeMl} mL)
                     </div>
-                    <div className="text-[10px] font-mono text-emerald-200 flex flex-wrap items-center gap-2 mt-0.5">
+                    <div className="text-[10px] font-mono text-slate-200 flex flex-wrap items-center gap-2 mt-0.5">
                       <span>Barcode: <strong>{lastPinnedPosScan.scannedCode}</strong></span>
                       <span>•</span>
                       <span>SKU: <strong>{lastPinnedPosScan.product.sku}</strong></span>
                       <span>•</span>
-                      <span>Added to Cart: <strong className="text-[#FFDE00]">+{lastPinnedPosScan.qtyAdded} btl(s)</strong></span>
+                      <span>Price: <strong className="text-emerald-300">{formatKes(lastPinnedPosScan.product.retailPriceKes)}</strong></span>
+                      <span>•</span>
+                      <span>Checkout Qty: <strong className="text-[#FFDE00]">+{lastPinnedPosScan.qtyAdded} btl</strong></span>
+                      <span>•</span>
+                      <span>Stock Left: <strong className="text-white">{lastPinnedPosScan.remainingAfterCart} btl</strong></span>
                     </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <div className="px-2.5 py-1 rounded-lg bg-white/10 border border-white/15 text-right font-mono">
-                    <div className="text-[9px] text-emerald-300 uppercase">Stock Subtraction Preview</div>
-                    <div className="text-xs font-black text-white">
-                      {lastPinnedPosScan.stockOnHand} on hand → <span className="text-[#FFDE00]">{lastPinnedPosScan.remainingAfterCart} left</span>
+                  <div className="px-2.5 py-1 rounded-lg bg-white/10 border border-white/20 text-right font-mono text-xs">
+                    <div className="text-[9px] text-[#FFDE00] uppercase font-bold">Line Total</div>
+                    <div className="font-black text-white">
+                      {formatKes(lastPinnedPosScan.product.retailPriceKes * lastPinnedPosScan.qtyAdded)}
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => setLastPinnedPosScan(null)}
-                    className="text-emerald-300 hover:text-white p-1 text-xs font-bold"
+                    className="text-white/60 hover:text-white p-1 text-xs font-bold transition"
                     title="Dismiss"
                   >
                     ✕
@@ -2310,9 +2534,24 @@ export const PosTerminal: React.FC = () => {
                             </button>
                           )}
 
-                          <div className="flex-1 py-2 px-2 bg-[#0A006E] group-hover:bg-[#060046] text-[#FFDE00] rounded-xl text-[10px] font-montserrat font-black transition flex items-center justify-center gap-1 shadow-2xs">
-                            <span>Preview • mL</span>
-                          </div>
+                          {product.barcode ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                processScannedBarcode(product.barcode);
+                              }}
+                              className="flex-1 py-1.5 px-1.5 bg-slate-100 hover:bg-[#FFDE00] text-slate-700 hover:text-[#0A006E] border border-slate-200 rounded-xl text-[9px] font-mono font-bold transition flex items-center justify-center gap-1 shadow-2xs cursor-pointer min-w-0"
+                              title={`Scan Barcode: ${product.barcode}`}
+                            >
+                              <Barcode className="w-3 h-3 text-[#0A006E] shrink-0" />
+                              <span className="truncate">{product.barcode}</span>
+                            </button>
+                          ) : (
+                            <div className="flex-1 py-1.5 px-2 bg-slate-100 text-slate-500 rounded-xl text-[9px] font-montserrat font-bold flex items-center justify-center gap-1">
+                              <span>{product.volumeMl}mL</span>
+                            </div>
+                          )}
 
                           {!isWarehouse && remainingAfterCart > 0 && (
                             <button
@@ -2371,11 +2610,11 @@ export const PosTerminal: React.FC = () => {
                   <div>
                     <h3 className="font-montserrat font-black text-base text-slate-900">
                       {posStationMode === 'SALES_LADY'
-                        ? 'Sales Representative POS (Direct Cash Out)'
-                        : 'Counter Cashier POS (Direct Counter Checkout)'}
+                        ? 'Sales Representative Customer Order'
+                        : 'Counter Cashier Checkout'}
                     </h3>
                     <p className="text-xs text-slate-500">
-                      {cart.length} unique line items • {posStationMode === 'SALES_LADY' ? 'Direct Self-Checkout / Cash Out' : 'Counter Settlement'}
+                      {cart.length} unique line items • {posStationMode === 'SALES_LADY' ? 'Submits to Counter Queue' : 'Counter Settlement'}
                     </p>
                   </div>
                 </div>
@@ -2437,101 +2676,94 @@ export const PosTerminal: React.FC = () => {
                 </div>
               </div>
 
-              {/* Active Staff Relationship Attribution Banner (Cashier & Sales Rep Relationship) */}
-              <div className="py-2.5 px-3 my-2 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5 relative">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <UserCheck className="w-4 h-4 text-[#0A006E] shrink-0" />
-                    <div className="text-xs truncate">
-                      {posStationMode === 'SALES_LADY' ? (
-                        <span>
-                          <span className="text-slate-500 font-medium">Sales Rep: </span>
-                          <strong className="font-mono font-bold text-[#0A006E]">
-                            {activeSalesLadyAffiliate?.name || currentUser.name}
-                          </strong>
-                          <span className="ml-1.5 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                            Self-Checkout (No Queueing)
-                          </span>
-                        </span>
-                      ) : recalledSalesPerson || selectedAffiliate ? (
-                        <span>
-                          <span className="text-slate-500 font-medium">Cashier: </span>
-                          <strong className="font-mono font-bold text-[#0A006E] mr-1">
-                            {activeCounterCashierName}
-                          </strong>
-                          <span className="text-slate-400">•</span>
-                          <span className="text-slate-500 font-medium ml-1">Sales Rep: </span>
-                          <strong className="font-mono font-bold text-emerald-700">
-                            {recalledSalesPerson?.name || selectedAffiliate?.name}
-                          </strong>
-                          <span className="ml-1.5 px-1.5 py-0.5 rounded bg-blue-100 text-[#0A006E] text-[10px] font-bold">
-                            Rep Order Linked
-                          </span>
-                        </span>
-                      ) : (
-                        <span>
-                          <span className="text-slate-500 font-medium">Counter Cashier: </span>
-                          <strong className="font-mono font-bold text-[#0A006E]">
-                            {activeCounterCashierName}
-                          </strong>
-                          <span className="ml-1.5 px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[10px] font-bold">
-                            Direct Counter Sale
-                          </span>
-                        </span>
-                      )}
-                    </div>
+              {/* Active Sales Staff Attribution Banner (Served by - [Name] on Thermal Receipt) */}
+              <div className="py-2.5 px-3 my-2 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-2 relative">
+                <div className="flex items-center gap-2 min-w-0">
+                  <UserCheck className="w-4 h-4 text-[#0A006E] shrink-0" />
+                  <div className="text-xs truncate">
+                    <span className="text-slate-500 font-medium">Receipt Attribution: </span>
+                    <strong className="font-mono font-bold text-[#0A006E]">
+                      Served by - {currentUser.name}
+                    </strong>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => openStaffPinPrompt()}
+                  className="text-[10px] font-montserrat font-black text-[#0A006E] bg-[#FFDE00] hover:bg-[#FFDE00]/85 px-2.5 py-1.5 rounded-lg border border-[#0A006E]/30 shrink-0 transition flex items-center gap-1 shadow-2xs"
+                >
+                  <Lock className="w-3 h-3 text-[#0A006E]" />
+                  <span>Switch Staff</span>
+                </button>
+              </div>
+
+              {/* Dedicated Cashier Barcode Scanner for Direct Checkout List Add */}
+              <div className="p-3 my-2 rounded-xl bg-gradient-to-r from-[#0A006E]/5 to-slate-50 border-2 border-[#0A006E]/20 space-y-2">
+                <div className="flex items-center justify-between text-[11px] font-montserrat font-black text-[#0A006E]">
+                  <span className="flex items-center gap-1.5 uppercase">
+                    <Barcode className="w-4 h-4 text-[#0A006E]" />
+                    <span>Scan Bottle to Add to Checkout List</span>
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-mono">Laser / Camera / Keypad</span>
+                </div>
+                <form onSubmit={handleCheckoutBarcodeSubmit} className="flex gap-1.5">
+                  <div className="relative flex-1">
+                    <Barcode className="w-4 h-4 text-[#0A006E] absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      ref={checkoutBarcodeInputRef}
+                      type="text"
+                      value={checkoutBarcodeInput}
+                      onChange={(e) => setCheckoutBarcodeInput(e.target.value)}
+                      placeholder="Scan bottle barcode (EAN-13 / UPC / SKU)..."
+                      className="w-full pl-8 pr-7 py-2 bg-white border-2 border-slate-300 focus:border-[#0A006E] rounded-lg text-xs font-mono focus:outline-none text-slate-900 placeholder:text-slate-400"
+                    />
+                    {checkoutBarcodeInput && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCheckoutBarcodeInput('');
+                          checkoutBarcodeInputRef.current?.focus();
+                        }}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+                      >
+                        ✕
+                      </button>
+                    )}
                   </div>
                   <button
                     type="button"
-                    onClick={() => openStaffPinPrompt()}
-                    className="text-[10px] font-montserrat font-black text-[#0A006E] bg-[#FFDE00] hover:bg-[#FFDE00]/85 px-2.5 py-1.5 rounded-lg border border-[#0A006E]/30 shrink-0 transition flex items-center gap-1 shadow-2xs cursor-pointer"
+                    onClick={() => setIsCameraModalOpen(true)}
+                    className="px-2.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold border border-slate-200 transition flex items-center gap-1 shrink-0 cursor-pointer"
+                    title="Open Camera Barcode Scanner"
                   >
-                    <Lock className="w-3 h-3 text-[#0A006E]" />
-                    <span>Switch Staff</span>
+                    <Camera className="w-3.5 h-3.5 text-[#0A006E]" />
+                    <span className="hidden sm:inline">Camera</span>
                   </button>
-                </div>
-
-                {/* Sub-strip detailing relationship between Cashier and Salesperson */}
-                <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-200/60 gap-1">
-                  {posStationMode === 'SALES_LADY' ? (
-                    <div className="flex items-center gap-1.5 text-[10px]">
-                      <span className="text-slate-400">Assigned Counter Cashier:</span>
-                      <strong className="font-semibold text-slate-700">
-                        {workingUnderCashier?.name || activeSalesLadyAffiliate?.assignedCashierName || 'Branch Cashier'}
-                      </strong>
-                      <span className="text-emerald-600 font-medium">(Available for optional collection handoff)</span>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1.5 text-[10px]">
-                      <span className="text-slate-400">Checkout Mode:</span>
-                      <strong className="font-semibold text-slate-700">
-                        {recalledSalesPerson || selectedAffiliate
-                          ? 'Recalled Rep Order (Both Rep Commission & Cashier Till Recorded)'
-                          : 'Counter Direct Checkout (Walk-in Customer)'}
-                      </strong>
-                    </div>
-                  )}
-
-                  {posStationMode === 'COUNTER_CASHIER' && !recalledSalesPerson && (
-                    <div className="flex items-center gap-1 text-[10px]">
-                      <span className="text-slate-400">Link Rep:</span>
-                      <select
-                        value={selectedAffiliate?.id || ''}
-                        onChange={(e) => {
-                          const found = affiliates.find(a => a.id === e.target.value);
-                          setSelectedAffiliate(found || null);
-                        }}
-                        className="px-1.5 py-0.5 bg-white border border-slate-300 rounded text-[10px] font-medium text-slate-700"
-                      >
-                        <option value="">None (Counter Walk-in)</option>
-                        {(branchAffiliates.length > 0 ? branchAffiliates : affiliates).map(a => (
-                          <option key={a.id} value={a.id}>
-                            {a.name} ({a.code})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+                  <button
+                    type="submit"
+                    className="px-3.5 py-2 bg-[#0A006E] hover:bg-[#060046] active:scale-95 text-[#FFDE00] rounded-lg font-montserrat font-black text-xs transition flex items-center gap-1 shrink-0 shadow-xs cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add</span>
+                  </button>
+                </form>
+                {/* 1-Tap Quick Scan Test Chips */}
+                <div className="flex items-center gap-1 flex-wrap pt-0.5">
+                  <span className="text-[9px] font-montserrat font-black text-slate-400 uppercase shrink-0">
+                    Quick Test:
+                  </span>
+                  {QUICK_POS_SCAN_SAMPLES.slice(0, 5).map(sample => (
+                    <button
+                      key={sample.code}
+                      type="button"
+                      onClick={() => processScannedBarcode(sample.code)}
+                      className="px-2 py-0.5 rounded bg-white hover:bg-[#FFDE00] text-slate-700 hover:text-[#0A006E] border border-slate-200 hover:border-[#0A006E] text-[9px] font-montserrat font-bold transition flex items-center gap-1 cursor-pointer active:scale-95"
+                      title={`Simulate barcode scan: ${sample.label} (${sample.code})`}
+                    >
+                      <Barcode className="w-2.5 h-2.5 shrink-0" />
+                      <span>{sample.label}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -2809,8 +3041,17 @@ export const PosTerminal: React.FC = () => {
                       const stockBefore = itemInv ? itemInv.bottlesOnHand : 0;
                       const stockAfter = Math.max(0, stockBefore - item.quantity);
 
+                      const isJustScanned = item.product.id === justScannedProductId;
+
                       return (
-                        <div key={item.product.id} className="snap-start py-2.5 min-h-[104px] flex flex-col justify-between gap-1.5">
+                        <div
+                          key={item.product.id}
+                          className={`snap-start py-2.5 px-2 rounded-xl transition-all duration-300 min-h-[104px] flex flex-col justify-between gap-1.5 ${
+                            isJustScanned
+                              ? 'bg-emerald-50/90 border-2 border-emerald-500 shadow-md ring-2 ring-emerald-400/40 animate-in fade-in'
+                              : 'hover:bg-slate-100/50'
+                          }`}
+                        >
                           <div className="flex items-start justify-between gap-2">
                             <div className="flex items-center gap-2.5 min-w-0">
                               <ProductImage
@@ -2818,10 +3059,24 @@ export const PosTerminal: React.FC = () => {
                                 size="xs"
                               />
                               <div className="min-w-0">
-                                <h5 className="font-montserrat font-bold text-xs text-slate-900 truncate">
-                                  {idx + 1}. {item.product.name}
-                                </h5>
-                                <div className="flex flex-wrap items-center gap-1.5">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <h5 className="font-montserrat font-bold text-xs text-slate-900 truncate">
+                                    {idx + 1}. {item.product.name}
+                                  </h5>
+                                  {isJustScanned && (
+                                    <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white font-montserrat font-black text-[9px] uppercase animate-pulse flex items-center gap-1 shrink-0">
+                                      <Check className="w-2.5 h-2.5" />
+                                      <span>Scanned &amp; Identified</span>
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                                  {item.product.barcode && (
+                                    <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200 flex items-center gap-1">
+                                      <Barcode className="w-2.5 h-2.5 text-[#0A006E]" />
+                                      <span>{item.product.barcode}</span>
+                                    </span>
+                                  )}
                                   <span className="text-[10px] font-mono font-bold text-[#0A006E] bg-[#0A006E]/10 px-1.5 py-0.2 rounded">
                                     Company Price: {formatKes(companyUnitPrice)}
                                   </span>
@@ -3344,16 +3599,16 @@ export const PosTerminal: React.FC = () => {
                 </div>
 
                 {posStationMode === 'SALES_LADY' ? (
-                  /* SALES REPRESENTATIVE ACTIONS: Prompt, Hold Slip, Queue to Cashier, and Direct Cash Out */
-                  <div className="grid grid-cols-12 gap-1.5 sm:gap-2 items-stretch">
+                  /* SALES AFFILIATE LADY ACTIONS: Prompt, Print & Hold, or Checkout (Submit to Cashier) */
+                  <div className="grid grid-cols-12 gap-2 items-stretch">
                     <button
                       type="button"
                       onClick={handleOpenPosPrompt}
                       disabled={cart.length === 0 || isWarehouse || isProcessingStk}
-                      className="col-span-3 py-3 px-1.5 bg-[#34D186] hover:bg-[#1E9E60] text-[#0A006E] border border-[#FFDE00]/60 rounded-xl font-montserrat font-black text-[11px] sm:text-xs shadow-md disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-1 text-center cursor-pointer"
+                      className="col-span-4 py-3 px-2.5 bg-[#34D186] hover:bg-[#1E9E60] text-[#0A006E] border border-[#FFDE00]/60 rounded-xl font-montserrat font-black text-xs shadow-md disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-1.5 text-center cursor-pointer"
                       title="Send M-Pesa STK Push Prompt to Customer Phone"
                     >
-                      <Smartphone className="w-3.5 h-3.5 shrink-0" />
+                      <Smartphone className="w-4 h-4 shrink-0" />
                       <span>Prompt</span>
                     </button>
 
@@ -3361,37 +3616,24 @@ export const PosTerminal: React.FC = () => {
                       type="button"
                       onClick={() => handleSalesLadySubmitToQueue('PRINT_RECEIPT_AND_HOLD')}
                       disabled={cart.length === 0 || isWarehouse}
-                      className="col-span-2 py-3 px-1 bg-white/10 hover:bg-white/20 text-white border border-white/25 rounded-xl font-montserrat font-bold text-[10px] shadow-md disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-0.5 text-center cursor-pointer"
-                      title="Print 80mm thermal slip & hold order"
+                      className="col-span-4 py-3 px-2.5 bg-white/10 hover:bg-white/20 text-white border border-white/25 rounded-xl font-montserrat font-black text-[11px] shadow-md disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-1 text-center cursor-pointer"
                     >
-                      <Printer className="w-3 h-3 text-[#FFDE00] shrink-0" />
-                      <span>Slip</span>
+                      <Printer className="w-3.5 h-3.5 text-[#FFDE00] shrink-0" />
+                      <span>Hold Slip</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => handleSalesLadySubmitToQueue('PAY_ON_COLLECTION')}
                       disabled={cart.length === 0 || isWarehouse}
-                      className="col-span-2 py-3 px-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-400/40 rounded-xl font-montserrat font-bold text-[10px] shadow-md disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-1 text-center cursor-pointer"
-                      title="Optional: Queue order to counter cashier for collection"
+                      className="col-span-4 py-3 px-3 bg-[#FFDE00] hover:bg-amber-400 text-[#0A006E] border-2 border-[#FFDE00] rounded-xl font-montserrat font-black text-xs shadow-lg disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-1.5 text-center cursor-pointer"
                     >
-                      <Send className="w-3 h-3 text-[#FFDE00] shrink-0" />
-                      <span>Queue</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleCheckout}
-                      disabled={cart.length === 0 || isWarehouse || isProcessingStk}
-                      className="col-span-5 py-3 px-2 bg-[#FFDE00] hover:bg-amber-400 text-[#0A006E] border-2 border-[#FFDE00] rounded-xl font-montserrat font-black text-xs sm:text-sm shadow-lg disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-1.5 text-center cursor-pointer"
-                      title="Direct Self-Checkout: Cash out sale and issue receipt immediately by yourself without queuing to cashier"
-                    >
-                      <CheckCircle2 className="w-4 h-4 text-[#0A006E] shrink-0" />
-                      <span>Cash Out (Self-Checkout)</span>
+                      <Send className="w-4 h-4 text-[#0A006E] shrink-0" />
+                      <span>Checkout</span>
                     </button>
                   </div>
                 ) : (
-                  /* COUNTER CASHIER ACTIONS: Print & Hold, M-Pesa STK Prompt, and Counter Checkout */
+                  /* COUNTER CASHIER ACTIONS: Print & Hold, M-Pesa STK Prompt, and Checkout */
                   <div className="grid grid-cols-12 gap-2 items-stretch">
                     <button
                       type="button"
@@ -3419,19 +3661,10 @@ export const PosTerminal: React.FC = () => {
                       type="button"
                       onClick={handleCheckout}
                       disabled={cart.length === 0 || isWarehouse || isProcessingStk}
-                      className="col-span-5 py-3 px-2 bg-[#FFDE00] hover:bg-amber-400 text-[#0A006E] border-2 border-[#FFDE00] rounded-xl font-montserrat font-black text-xs sm:text-sm shadow-lg disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-1.5 text-center cursor-pointer"
-                      title={
-                        recalledSalesPerson || selectedAffiliate
-                          ? `Counter Checkout: Process order for Sales Rep ${recalledSalesPerson?.name || selectedAffiliate?.name} (both rep commission and cashier reconciliation recorded)`
-                          : 'Counter Checkout: Complete direct sale made from counter & issue receipt immediately'
-                      }
+                      className="col-span-5 py-3 px-3 bg-[#FFDE00] hover:bg-amber-400 text-[#0A006E] border-2 border-[#FFDE00] rounded-xl font-montserrat font-black text-xs sm:text-sm shadow-lg disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-1.5 text-center cursor-pointer"
                     >
                       <CheckCircle2 className="w-4 h-4 shrink-0" />
-                      <span>
-                        {recalledSalesPerson || selectedAffiliate
-                          ? 'Checkout Rep Order'
-                          : 'Counter Checkout'}
-                      </span>
+                      <span>Checkout</span>
                     </button>
                   </div>
                 )}
@@ -3513,6 +3746,7 @@ export const PosTerminal: React.FC = () => {
         </div>
 
       </div>
+      )}
 
       {/* MOBILE APP FLOATING BOTTOM CHECKOUT BAR (Visible on Mobile Catalog/Queue when Cart has items) */}
       {mobilePosTab !== 'CHECKOUT' && cart.length > 0 && (
@@ -4479,20 +4713,14 @@ export const PosTerminal: React.FC = () => {
               .filter(c => (c.product.id.includes('-vol-') ? c.product.id.split('-vol-')[0] : c.product.id) === baseProdId)
               .reduce((s, c) => s + c.quantity, 0);
 
-            if (stock <= 0 || existingInCart + qtyToAdd > stock) {
-              setBarcodeFeedback(`⚠️ Insufficient stock for ${product.name}: ${stock} btls available.`);
-              showErrorFeedback('Insufficient Stock', `${product.name} only has ${stock} btls available`);
-              playBeep(300, 150);
-              return;
-            }
             addToCart(product, qtyToAdd, 0);
             playBeep(1200, 70);
             showSuccessFeedback(
               'Scanned & Added!',
               `${qtyToAdd} × ${product.name}`,
-              `Barcode: ${rawBarcode}`
+              `Barcode: ${rawBarcode} • ${formatKes(product.retailPriceKes)}`
             );
-            const remainingAfterCart = Math.max(0, stock - (existingInCart + qtyToAdd));
+            const remainingAfterCart = stock > 0 ? Math.max(0, stock - (existingInCart + qtyToAdd)) : 0;
             setLastPinnedPosScan({
               product,
               scannedCode: rawBarcode,
@@ -4502,7 +4730,7 @@ export const PosTerminal: React.FC = () => {
               remainingAfterCart
             });
             setBarcodeFeedback(
-              `✓ Camera Auto-Pinned [${rawBarcode}] → ${product.name} (+${qtyToAdd} added to cart • ${remainingAfterCart} btls left)`
+              `✓ Camera Scanned [${rawBarcode}] → ${product.name} (+${qtyToAdd} added to checkout list • ${formatKes(product.retailPriceKes)})`
             );
           }}
           onClose={() => setIsCameraModalOpen(false)}
@@ -4867,18 +5095,7 @@ export const PosTerminal: React.FC = () => {
                             return (
                               <tr key={order.id} className="hover:bg-slate-50/80">
                                 <td className="py-3 px-4">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <span className="font-mono font-black text-[#0A006E]">{order.orderNumber}</span>
-                                    {order.checkoutRole === 'SALES_REP_SELF_CHECKOUT' ? (
-                                      <span className="px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 text-[9px] font-bold">
-                                        Self-Checkout
-                                      </span>
-                                    ) : (
-                                      <span className="px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 text-[9px] font-bold">
-                                        Counter Cashier: {order.cashierName}
-                                      </span>
-                                    )}
-                                  </div>
+                                  <div className="font-mono font-black text-[#0A006E]">{order.orderNumber}</div>
                                   <div className="font-mono text-[10px] text-slate-500">
                                     {new Date(order.createdAt).toLocaleString()}
                                   </div>
@@ -4991,6 +5208,23 @@ export const PosTerminal: React.FC = () => {
           onClose={() => setActiveOrderItemsDocument(null)}
         />
       )}
+
+      {/* Cashier Catalog Lookup Slide-Over Drawer */}
+      <CatalogLookupDrawer
+        isOpen={isCatalogDrawerOpen}
+        onClose={() => setIsCatalogDrawerOpen(false)}
+        products={products}
+        inventoryItems={inventoryItems}
+        activeBranchId={activeBranch.id}
+        onAddToCart={(p, qty) => {
+          addToCart(p, qty || 1, 0);
+          playBeep(1200, 70);
+          showSuccessFeedback('Added to List!', `${p.name} (1 unit)`, formatKes(p.retailPriceKes));
+        }}
+        onScanBarcode={(code) => {
+          processScannedBarcode(code);
+        }}
+      />
 
       {/* Center Screen Animated Feedback (Tick on Success / X on Error) */}
       <CenterScreenFeedback

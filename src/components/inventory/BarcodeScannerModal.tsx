@@ -110,13 +110,41 @@ export const BarcodeScannerModal: React.FC<Props> = ({
     if (!clean) return;
 
     if (purpose === 'POS_SELL') {
-      const matched = products.find(
+      const cleanLower = clean.toLowerCase();
+      const alphanumericOnly = clean.replace(/[^a-zA-Z0-9-]/g, '');
+      const digitsOnly = clean.replace(/\D/g, '');
+
+      let matched = products.find(
         p =>
           p.barcode === clean ||
+          p.barcode === alphanumericOnly ||
+          (digitsOnly && p.barcode === digitsOnly) ||
           p.caseBarcode === clean ||
-          p.sku.toLowerCase() === clean.toLowerCase() ||
-          (clean.startsWith('1') && p.barcode === clean.slice(1))
+          p.caseBarcode === alphanumericOnly ||
+          (digitsOnly && p.caseBarcode === digitsOnly) ||
+          p.sku.toLowerCase() === cleanLower ||
+          p.sku.toLowerCase() === alphanumericOnly.toLowerCase() ||
+          p.id === clean ||
+          p.id.toLowerCase() === cleanLower
       );
+
+      // UPC-A (12 digits) with leading zero
+      if (!matched && (clean.length === 12 || digitsOnly.length === 12)) {
+        const code12 = digitsOnly.length === 12 ? digitsOnly : clean;
+        const withZero = '0' + code12;
+        matched = products.find(p => p.barcode === withZero || p.barcode === code12);
+      }
+      // EAN-13 with leading zero stripped
+      if (!matched && (clean.length === 13 || digitsOnly.length === 13) && (clean.startsWith('0') || digitsOnly.startsWith('0'))) {
+        const code13 = digitsOnly.length === 13 ? digitsOnly : clean;
+        matched = products.find(p => p.barcode === code13.substring(1) || p.barcode === code13);
+      }
+      // GTIN-14 / ITF-14 case code
+      if (!matched && (clean.length === 14 || digitsOnly.length === 14)) {
+        const code14 = digitsOnly.length === 14 ? digitsOnly : clean;
+        const inner = code14.substring(1);
+        matched = products.find(p => p.barcode === inner || ('0' + p.barcode) === code14 || p.caseBarcode === code14);
+      }
 
       if (!matched) {
         playBeep(true);
@@ -139,24 +167,10 @@ export const BarcodeScannerModal: React.FC<Props> = ({
         branchInv && branchInv.bottlesOnHand > 0
           ? branchInv.bottlesOnHand
           : fallbackInv?.bottlesOnHand ?? branchInv?.bottlesOnHand ?? 0;
-      const existingCartItem = cart.find(c => c.product.id === matched.id);
-      const currentInCart = existingCartItem?.quantity ?? 0;
-
-      if (avail <= 0 || currentInCart >= avail) {
-        playBeep(true);
-        setScanFeedback({
-          ok: false,
-          title: 'Out of Stock',
-          subtitle: `${matched.name} has ${avail} bottles available.`,
-          product: matched,
-          rawBarcode: clean
-        });
-        return;
-      }
-
       const isCaseScan =
         matched.caseBarcode === clean ||
-        (clean.startsWith('1') && matched.barcode === clean.slice(1));
+        matched.caseBarcode === alphanumericOnly ||
+        (clean.length === 14 && (matched.caseBarcode === clean || ('0' + matched.barcode) === clean));
       const qtyToAdd = isCaseScan ? matched.packSize || 12 : 1;
 
       playBeep(false);
@@ -169,12 +183,12 @@ export const BarcodeScannerModal: React.FC<Props> = ({
       setScanFeedback({
         ok: true,
         title: `Added +${qtyToAdd} to Cart`,
-        subtitle: `${matched.name} • ${formatKes(matched.retailPriceKes)}`,
+        subtitle: `${matched.name} • ${formatKes(matched.retailPriceKes)}${avail > 0 ? ` (${avail} in stock)` : ''}`,
         product: matched,
         rawBarcode: clean
       });
-      setAwaitingNextScan(true);
-      awaitingNextScanRef.current = true;
+      setAwaitingNextScan(false);
+      awaitingNextScanRef.current = false;
 
       if (onProductScanned) {
         onProductScanned(matched, clean);

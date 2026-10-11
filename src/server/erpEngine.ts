@@ -380,13 +380,6 @@ export interface AuthoritativeSaleRecord {
   refundedBy?: string;
   refundReason?: string;
   idempotencyKey?: string;
-  cashierId?: string;
-  cashierName?: string;
-  salesPersonId?: string;
-  salesPersonName?: string;
-  affiliateId?: string;
-  affiliateName?: string;
-  checkoutRole?: string;
   createdBy: string;
   createdByName: string;
   createdAt: string;
@@ -762,8 +755,7 @@ export class AuthoritativeErpEngine {
 
     // Ensure whitelisted super-admin emails and any explicitly configured ADMIN_EMAILS from env have a server-controlled membership record
     const builtInSuperAdmins = [
-      'gduniversalstudio@gmail.com',
-      'zamodasports@gmail.com'
+      'gduniversalstudio@gmail.com'
     ];
     const envAdminEmails = [
       ...builtInSuperAdmins,
@@ -994,12 +986,6 @@ export class AuthoritativeErpEngine {
       {
         userId: 'user-gduniversalstudio@gmail.com',
         email: 'gduniversalstudio@gmail.com',
-        role: 'SUPER_ADMIN',
-        department: 'BRANCH_MANAGER'
-      },
-      {
-        userId: 'user-zamodasports@gmail.com',
-        email: 'zamodasports@gmail.com',
         role: 'SUPER_ADMIN',
         department: 'BRANCH_MANAGER'
       }
@@ -2304,13 +2290,6 @@ export class AuthoritativeErpEngine {
     customerName?: string;
     customerEmail?: string;
     customerPhone?: string;
-    cashierId?: string;
-    cashierName?: string;
-    salesPersonId?: string;
-    salesPersonName?: string;
-    affiliateId?: string;
-    affiliateName?: string;
-    checkoutRole?: string;
     idempotencyKey?: string;
     reservationId?: string;
     strictPersistence?: boolean;
@@ -2714,9 +2693,6 @@ export class AuthoritativeErpEngine {
           ? STANDARD_CHART_OF_ACCOUNTS.CARD_BANK_SETTLEMENT
           : STANDARD_CHART_OF_ACCOUNTS.CASH_ON_HAND;
 
-      // Net sales revenue credit exactly balances gross payment less output VAT
-      const netSalesRevenueCredit = Math.max(0, Math.round((totalAmountKes - vatAmountKes) * 100) / 100);
-
       const journalLines: AccountingJournalLine[] = [
         {
           accountCode: paymentAccount.code,
@@ -2728,7 +2704,7 @@ export class AuthoritativeErpEngine {
           accountCode: STANDARD_CHART_OF_ACCOUNTS.SALES_REVENUE.code,
           accountName: STANDARD_CHART_OF_ACCOUNTS.SALES_REVENUE.name,
           debitKes: 0,
-          creditKes: netSalesRevenueCredit
+          creditKes: subtotalKes
         }
       ];
 
@@ -2758,24 +2734,8 @@ export class AuthoritativeErpEngine {
         );
       }
 
-      // Enforce zero mathematical variance so Financial Ledger is always 100% balanced
-      const initialTotalDebit = Math.round(journalLines.reduce((s, l) => s + l.debitKes, 0) * 100) / 100;
-      const initialTotalCredit = Math.round(journalLines.reduce((s, l) => s + l.creditKes, 0) * 100) / 100;
-      const ledgerVariance = Math.round((initialTotalDebit - initialTotalCredit) * 100) / 100;
-      if (ledgerVariance !== 0) {
-        const revLine = journalLines.find(l => l.accountCode === STANDARD_CHART_OF_ACCOUNTS.SALES_REVENUE.code);
-        if (revLine) {
-          revLine.creditKes = Math.round((revLine.creditKes + ledgerVariance) * 100) / 100;
-        }
-      }
-
       const totalDebitKes = Math.round(journalLines.reduce((s, l) => s + l.debitKes, 0) * 100) / 100;
       const totalCreditKes = Math.round(journalLines.reduce((s, l) => s + l.creditKes, 0) * 100) / 100;
-
-      const effectiveCashierId = params.cashierId || params.user.userId;
-      const effectiveCashierName = params.cashierName || params.user.name;
-      const effectiveSalesPersonId = params.salesPersonId || params.affiliateId;
-      const effectiveSalesPersonName = params.salesPersonName || params.affiliateName;
 
       const journalEntry: AccountingJournalEntry = {
         id: `je-${orderNumber}`,
@@ -2785,7 +2745,7 @@ export class AuthoritativeErpEngine {
         periodId: nowIso.slice(0, 7),
         branchId: params.branchId,
         date: nowIso.slice(0, 10),
-        description: `POS Sale ${orderNumber} (${paymentRecord.paymentMethod}) • Cashier: ${effectiveCashierName}${effectiveSalesPersonName ? ` • Rep: ${effectiveSalesPersonName}` : ''}`,
+        description: `POS Sale ${orderNumber} (${paymentRecord.paymentMethod})`,
         lines: journalLines,
         totalDebitKes,
         totalCreditKes,
@@ -2804,7 +2764,7 @@ export class AuthoritativeErpEngine {
       });
       fiscalRecord.organizationId = resolvedOrgId;
 
-      // 13. Record Sale Header stamped with organizationId and staff relationship
+      // 13. Record Sale Header stamped with organizationId
       const saleRecord: AuthoritativeSaleRecord = {
         id: `sale-${orderNumber}`,
         organizationId: resolvedOrgId,
@@ -2825,13 +2785,6 @@ export class AuthoritativeErpEngine {
         fiscalTransactionId: fiscalRecord.id,
         status: 'COMPLETED',
         idempotencyKey: params.idempotencyKey,
-        cashierId: effectiveCashierId,
-        cashierName: effectiveCashierName,
-        salesPersonId: effectiveSalesPersonId,
-        salesPersonName: effectiveSalesPersonName,
-        affiliateId: effectiveSalesPersonId,
-        affiliateName: effectiveSalesPersonName,
-        checkoutRole: params.checkoutRole,
         createdBy: params.user.userId,
         createdByName: params.user.name,
         createdAt: nowIso
@@ -2857,16 +2810,11 @@ export class AuthoritativeErpEngine {
           receiptNumber,
           totalAmountKes,
           vatAmountKes,
-          itemsCount: resolvedSaleLines.length,
-          cashierId: effectiveCashierId,
-          cashierName: effectiveCashierName,
-          salesPersonId: effectiveSalesPersonId,
-          salesPersonName: effectiveSalesPersonName,
-          checkoutRole: params.checkoutRole
+          itemsCount: resolvedSaleLines.length
         },
         ipAddress: params.ipAddress,
         userAgent: params.userAgent,
-        actionDetails: `Completed sale ${orderNumber} (${totalAmountKes} KES) with receipt ${receiptNumber} and journal ${journalEntryNumber} (Cashier: ${effectiveCashierName}, Sales Rep: ${effectiveSalesPersonName || 'Counter Direct'}).`
+        actionDetails: `Completed sale ${orderNumber} (${totalAmountKes} KES) with receipt ${receiptNumber} and journal ${journalEntryNumber}.`
       });
 
       const responseBody: Record<string, unknown> = {
@@ -2881,11 +2829,6 @@ export class AuthoritativeErpEngine {
         discountKes,
         vatAmountKes,
         totalAmountKes,
-        cashierId: effectiveCashierId,
-        cashierName: effectiveCashierName,
-        salesPersonId: effectiveSalesPersonId,
-        salesPersonName: effectiveSalesPersonName,
-        checkoutRole: params.checkoutRole,
         etimsRecord: fiscalRecord,
         journalEntryId: journalEntry.id,
         journalEntryNumber,
