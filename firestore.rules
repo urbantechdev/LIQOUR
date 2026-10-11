@@ -34,7 +34,7 @@ service cloud.firestore {
     // Authorization derives from verified runtime admin identity, custom claims, or active server-controlled organizationMemberships.
     function isAdmin() {
       return isAuthenticated() && (
-        (request.auth.token.email in ['gduniversalstudio@gmail.com'] && request.auth.token.email_verified == true) ||
+        (request.auth.token.email in ['urbaninteriorkenya@gmail.com'] && request.auth.token.email_verified == true) ||
         request.auth.token.admin == true ||
         request.auth.token.role in ['SUPER_ADMIN', 'ORG_OWNER', 'ORG_ADMIN'] ||
         hasActiveAdminMembership('org-merchant-vaairo-hq') ||
@@ -454,6 +454,19 @@ service cloud.firestore {
       );
       allow list: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid) || canAccessBranchData(resource.data.branchId);
       allow create, update: if isAuthenticated() && isValidId(userId) && isValidUserSessionMonitor(request.resource.data);
+      allow delete: if isAdmin() && isValidId(userId);
+    }
+
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (
+        isAdmin() ||
+        (isAuthenticated() && (request.auth.uid == userId || request.auth.token.email == resource.data.email))
+      );
+      allow list: if isAdmin();
+      allow create, update: if isValidId(userId) && (
+        isAdmin() ||
+        (isAuthenticated() && request.auth.uid == userId)
+      );
       allow delete: if isAdmin() && isValidId(userId);
     }
 

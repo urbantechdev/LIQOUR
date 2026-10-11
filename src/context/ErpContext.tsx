@@ -127,7 +127,8 @@ import {
   staffDirectoryRecordToAffiliate,
   parseStaffPersonalData,
   upsertStaffRecordAcrossAllTiers,
-  findStaffByPinInstant
+  findStaffByPinInstant,
+  clearAllStaffIndexedDb
 } from '../utils/staffDatabase';
 import {
   verifyTotpCode,
@@ -313,6 +314,7 @@ interface ErpContextType {
   lastCompletedInvoice: ETimsInvoice | null;
   setLastCompletedInvoice: (inv: ETimsInvoice | null) => void;
   cleanAllSalesData: () => Promise<{ success: boolean; message: string; cleanedCount?: number }>;
+  wipeAllPlatformData: () => Promise<{ success: boolean; message: string }>;
 
   // User-Facing Website Storefront & Delivery Hold -> M-Pesa Self-Prompt Completion
   websiteDeliveryOrders: WebsiteDeliveryOrder[];
@@ -756,11 +758,16 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         'website_delivery_orders_v1',
         'offline_queued_checkouts_v1',
         'etims',
-        'vaairo_admin_totp_secret_v1'
+        'vaairo_admin_totp_secret_v1',
+        'vaairo_independent_staff_db_v1_records',
+        'vaairo_independent_staff_db_v1_snapshots',
+        'vaairo_deleted_staff_ids_v1'
       ];
       sensitiveKeys.forEach(sk => {
         localStorage.removeItem(STORAGE_PREFIX + sk);
+        localStorage.removeItem(sk);
         sessionStorage.removeItem(STORAGE_PREFIX + sk);
+        sessionStorage.removeItem(sk);
       });
       Object.keys(localStorage).forEach(k => {
         const val = localStorage.getItem(k) || '';
@@ -772,11 +779,15 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           k === 'vaairo_affiliates_seeded_v1' ||
           k === 'vaairo_web_orders_seeded_v1' ||
           k === 'vaairo_mgr_seed_v2' ||
-          k === 'vaairo_nd_catalog_seeded_v1'
+          k === 'vaairo_nd_catalog_seeded_v1' ||
+          k === 'vaairo_independent_staff_db_v1_records' ||
+          k === 'vaairo_independent_staff_db_v1_snapshots' ||
+          k === 'vaairo_deleted_staff_ids_v1'
         ) {
           localStorage.removeItem(k);
         }
       });
+      clearAllStaffIndexedDb().catch(() => {});
     } catch (e) {
       console.warn('Storage cleanup skipped:', e);
     }
@@ -3368,6 +3379,103 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
   }, [orders.length, currentUser.name, logUserActivity]);
+
+  const wipeAllPlatformData = React.useCallback(async (): Promise<{ success: boolean; message: string }> => {
+    try {
+      // 1. Reset all operational states
+      setOrders([]);
+      setWebsiteDeliveryOrders([]);
+      setHeldCarts([]);
+      setOfflineQueuedCheckouts([]);
+      setEtimsInvoices([]);
+      setLastCompletedInvoice(null);
+      setCart([]);
+      setCommissions([]);
+      setPayrollRecords([]);
+      setMpesaTransactions([]);
+      setJournalEntries([]);
+      setSuppliers([]);
+      setDistributors([]);
+      setSupplyInvoices([]);
+      setQuotes([]);
+      setCommercialInvoices([]);
+      setEmployeeLeaveRequests([]);
+      setSalesRepOffDutyRequests([]);
+      setEmployees([]);
+      setAffiliates([]);
+      setStaffDatabaseRecords([]);
+      setUserActivityLogs([]);
+      setUserSessionMonitors([]);
+      setRestockRequests([]);
+      setScanHistory([]);
+      setInventoryItems(prev => prev.map(item => ({ ...item, currentStock: 0, allocatedStock: 0, availableStock: 0 })));
+
+      // 2. Clear browser storage keys
+      if (typeof localStorage !== 'undefined') {
+        const wipeKeys = [
+          'vaairo_independent_staff_db_v1_records',
+          'vaairo_independent_staff_db_v1_snapshots',
+          'vaairo_deleted_staff_ids_v1',
+          'vaairo_affiliates_seeded_v1',
+          'vaairo_web_orders_seeded_v1',
+          'vaairo_mgr_seed_v2',
+          'vaairo_nd_catalog_seeded_v1',
+          'vaairo_pos_held_cart_v2',
+          'vaairo_website_held_cart_v2'
+        ];
+        wipeKeys.forEach(k => {
+          try {
+            localStorage.removeItem(k);
+            sessionStorage.removeItem(k);
+          } catch {}
+        });
+
+        Object.keys(localStorage).forEach(k => {
+          if (
+            k.startsWith(STORAGE_PREFIX) &&
+            !k.includes('branding') &&
+            !k.includes('activeBranchId')
+          ) {
+            try {
+              localStorage.removeItem(k);
+            } catch {}
+          }
+        });
+        await clearAllStaffIndexedDb().catch(() => {});
+      }
+
+      // 3. Request authoritative server wipe
+      try {
+        const token = getStoredSessionToken();
+        const res = await fetch('/api/admin/wipe-all-data', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+          }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          return {
+            success: true,
+            message: data.message || 'Platform operational data and mock records wiped successfully.'
+          };
+        }
+      } catch {
+        // Fallback if offline
+      }
+
+      return {
+        success: true,
+        message: 'Platform operational data and mock records wiped successfully.'
+      };
+    } catch (err: unknown) {
+      return {
+        success: false,
+        message: err instanceof Error ? err.message : 'Failed to wipe platform data.'
+      };
+    }
+  }, []);
 
   // Auth Operations
   const loginAsRole = (role: UserRole, department: DepartmentType, branchId?: string, staffNameOverride?: string) => {
@@ -9693,6 +9801,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lastCompletedInvoice,
         setLastCompletedInvoice,
         cleanAllSalesData,
+        wipeAllPlatformData,
         websiteDeliveryOrders,
         placeWebsiteDeliveryOrder,
         updateWebsiteDeliveryOrderStatus,

@@ -358,30 +358,6 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
         });
       });
 
-    if (dept === 'POS' && byId.size === 0) {
-      byId.set('emp-cashier-01', {
-        id: 'emp-cashier-01',
-        name: 'Jane Wanjiku',
-        employeeNumber: 'CSH-001',
-        department: 'POS',
-        branchId: 'branch-hq-main',
-        loginPin: '123456',
-        isAffiliate: false
-      });
-    }
-
-    if (dept === 'AFFILIATES' && byId.size === 0) {
-      byId.set('aff-rep-01', {
-        id: 'aff-rep-01',
-        name: 'Grace Muthoni',
-        employeeNumber: 'REP-01',
-        department: 'AFFILIATES',
-        branchId: 'branch-hq-main',
-        loginPin: '654321',
-        isAffiliate: true
-      });
-    }
-
     return Array.from(byId.values());
   }, [affiliates, employees, staffDatabaseRecords]);
 
@@ -422,9 +398,7 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
       const idToken = await cred.user.getIdToken().catch(() => '');
 
       const builtInSuperAdmins = [
-        'gduniversalstudio@gmail.com',
-        'moraasdorcah@gmail.com',
-        'muyamoz@gmail.com',
+        'urbaninteriorkenya@gmail.com',
         'support@urbantechdev.com',
         'admin@vaairo.co.ke'
       ];
@@ -626,8 +600,8 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
     setIsSubmitting(true);
     setGoogleLoginError(null);
     try {
-      const email = targetRole === 'SUPER_ADMIN' ? 'gduniversalstudio@gmail.com' : 'accountant@vaairo.co.ke';
-      const name = targetRole === 'SUPER_ADMIN' ? 'System Administrator' : 'Corporate Accountant';
+      const email = targetRole === 'SUPER_ADMIN' ? 'urbaninteriorkenya@gmail.com' : 'accountant@vaairo.co.ke';
+      const name = targetRole === 'SUPER_ADMIN' ? 'Executive Administrator' : 'Corporate Accountant';
       const targetDept: DepartmentType = targetRole === 'ACCOUNTANT' ? 'FINANCE' : 'BRANCH_MANAGER';
       const targetBranch = selectedBranchId || 'branch-hq-main';
 
@@ -1419,7 +1393,7 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
                     </span>
                   </button>
                   <p className="text-[10px] text-amber-900 text-center mt-1.5 font-medium">
-                    Bypasses Firebase popup domain check and authenticates immediately as <strong>{googleTargetRole === 'SUPER_ADMIN' ? 'gduniversalstudio@gmail.com' : 'accountant@vaairo.co.ke'}</strong>
+                    Bypasses Firebase popup domain check and authenticates immediately as <strong>{googleTargetRole === 'SUPER_ADMIN' ? 'urbaninteriorkenya@gmail.com' : 'accountant@vaairo.co.ke'}</strong>
                   </p>
                 </div>
 
@@ -1436,10 +1410,10 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
                       Scroll down to <strong>Authorized domains</strong> and click <strong>Add domain</strong>
                     </li>
                     <li>
-                      Paste <code className="px-1 py-0.5 bg-slate-100 rounded text-slate-900 font-mono font-bold">{typeof window !== 'undefined' ? window.location.hostname : 'ais-dev-lxkly7ln76wptybm7utbhy-639713775043.europe-west2.run.app'}</code> and save
+                      Paste <code className="px-1 py-0.5 bg-slate-100 rounded text-slate-900 font-mono font-bold">{typeof window !== 'undefined' ? window.location.hostname : 'ais-dev-gcgwm7li67laheg33xkccf-792792559351.europe-west2.run.app'}</code> and save
                     </li>
                     <li className="text-slate-500">
-                      (Also add <code className="px-1 py-0.5 bg-slate-100 rounded text-slate-700 font-mono text-[10px]">ais-pre-lxkly7ln76wptybm7utbhy-639713775043.europe-west2.run.app</code> for shared previews)
+                      (Also add <code className="px-1 py-0.5 bg-slate-100 rounded text-slate-700 font-mono text-[10px]">ais-pre-gcgwm7li67laheg33xkccf-792792559351.europe-west2.run.app</code> for shared previews)
                     </li>
                   </ol>
                 </div>

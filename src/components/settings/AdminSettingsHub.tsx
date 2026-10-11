@@ -23,6 +23,7 @@ import {
   Wine,
   Sparkles,
   ShieldCheck,
+  ShieldAlert,
   Smartphone,
   Store,
   Menu,
@@ -74,6 +75,7 @@ export const AdminSettingsHub: React.FC = () => {
     savePromotion,
     deletePromotion,
     cleanAllSalesData,
+    wipeAllPlatformData,
     orders
   } = useErp();
 
@@ -82,6 +84,8 @@ export const AdminSettingsHub: React.FC = () => {
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
   const [isCleaningSales, setIsCleaningSales] = useState<boolean>(false);
   const [confirmCleanSales, setConfirmCleanSales] = useState<boolean>(false);
+  const [isWipingAll, setIsWipingAll] = useState<boolean>(false);
+  const [confirmWipeAll, setConfirmWipeAll] = useState<boolean>(false);
 
   const handleCleanSales = async () => {
     setIsCleaningSales(true);
@@ -93,6 +97,14 @@ export const AdminSettingsHub: React.FC = () => {
     } else {
       showFeedback(`Error cleaning sales: ${res.message}`);
     }
+  };
+
+  const handleWipeAll = async () => {
+    setIsWipingAll(true);
+    const res = await wipeAllPlatformData();
+    setIsWipingAll(false);
+    setConfirmWipeAll(false);
+    showFeedback(res.message);
   };
 
   // TOTP (2FA) Server Enrollment & Status State
@@ -2844,6 +2856,68 @@ export const AdminSettingsHub: React.FC = () => {
                       disabled={isCleaningSales}
                       onClick={() => setConfirmCleanSales(false)}
                       className="px-3 py-2.5 rounded-xl bg-white border border-rose-300 text-slate-700 font-bold text-xs hover:bg-rose-50 transition cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Production Grade Complete Platform Wipe & Pristine State Card */}
+          <div className="p-5 rounded-2xl bg-amber-500/10 border border-amber-300 shadow-sm space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="w-5 h-5 text-amber-700" />
+                  <h4 className="font-montserrat font-black text-sm sm:text-base text-amber-950">
+                    Production Grade Platform Wipe &amp; Mock Purge
+                  </h4>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-200 text-amber-900">
+                    Zero-Mock Production Mode
+                  </span>
+                </div>
+                <p className="text-xs text-amber-800 mt-1 max-w-2xl leading-relaxed">
+                  Permanently wipe all operational transactions, mock staff records, demo sessions, ledger history, and pending carts across both browser memory and server databases. Leaves only the genuine catalog definitions (0 stock) and executive administrator accounts ready for live production use.
+                </p>
+              </div>
+
+              <div className="shrink-0">
+                {!confirmWipeAll ? (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmWipeAll(true)}
+                    className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-montserrat font-black text-xs flex items-center gap-2 shadow-sm transition cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Wipe Platform to Clean Production</span>
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={isWipingAll}
+                      onClick={handleWipeAll}
+                      className="px-4 py-2.5 rounded-xl bg-red-700 hover:bg-red-800 text-white font-montserrat font-black text-xs flex items-center gap-2 shadow-sm transition cursor-pointer disabled:opacity-50"
+                    >
+                      {isWipingAll ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Wiping Platform...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 className="w-4 h-4" />
+                          <span>Confirm Production Wipe</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isWipingAll}
+                      onClick={() => setConfirmWipeAll(false)}
+                      className="px-3 py-2.5 rounded-xl bg-white border border-amber-300 text-slate-700 font-bold text-xs hover:bg-amber-50 transition cursor-pointer"
                     >
                       Cancel
                     </button>

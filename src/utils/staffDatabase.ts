@@ -320,6 +320,23 @@ export async function deleteRecordFromStaffIndexedDb(staffId: string): Promise<v
   });
 }
 
+export async function clearAllStaffIndexedDb(): Promise<void> {
+  const idb = await openStaffIndexedDb();
+  if (!idb) return;
+
+  return new Promise(resolve => {
+    try {
+      const tx = idb.transaction([IDB_STORE_RECORDS, IDB_STORE_DATA], 'readwrite');
+      tx.objectStore(IDB_STORE_RECORDS).clear();
+      tx.objectStore(IDB_STORE_DATA).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
 // ============================================================================
 // TIER 3: Firebase Firestore Real-Time Cloud Staff Directory
 // ============================================================================

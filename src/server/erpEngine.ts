@@ -755,7 +755,7 @@ export class AuthoritativeErpEngine {
 
     // Ensure whitelisted super-admin emails and any explicitly configured ADMIN_EMAILS from env have a server-controlled membership record
     const builtInSuperAdmins = [
-      'gduniversalstudio@gmail.com'
+      'urbaninteriorkenya@gmail.com'
     ];
     const envAdminEmails = [
       ...builtInSuperAdmins,
@@ -984,8 +984,8 @@ export class AuthoritativeErpEngine {
       branchId?: string;
     }> = [
       {
-        userId: 'user-gduniversalstudio@gmail.com',
-        email: 'gduniversalstudio@gmail.com',
+        userId: 'user-urbaninteriorkenya@gmail.com',
+        email: 'urbaninteriorkenya@gmail.com',
         role: 'SUPER_ADMIN',
         department: 'BRANCH_MANAGER'
       }
@@ -4161,6 +4161,56 @@ export class AuthoritativeErpEngine {
     this.persistState();
     return {
       cleanedSalesCount: previousCount,
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  public wipeAllOperationalData(): {
+    cleanedSalesCount: number;
+    cleanedLedgerCount: number;
+    cleanedStaffCount: number;
+    timestamp: string;
+  } {
+    const prevSales = this.sales.size;
+    const prevLedger = this.inventoryLedger.length;
+    const prevStaff = this.staffAuthStore.size;
+
+    this.sales.clear();
+    this.payments.clear();
+    this.receipts.clear();
+    this.fiscalTransactions.clear();
+    this.stockTransfers.clear();
+    this.inventoryLedger = [];
+    this.notifications = [];
+    this.auditLogs = [];
+    this.emailLogs = [];
+    this.staffAuthStore.clear();
+    this.organizationMemberships.clear();
+
+    // Re-seed only the authoritative Super Admin (urbaninteriorkenya@gmail.com)
+    this.seedDefaultStaffCredentials();
+
+    this.documentSequences = {
+      ...this.documentSequences,
+      ORD: 1000,
+      INV: 1000,
+      RCT: 1000
+    };
+
+    // Reset all inventory items to 0 current stock (pristine un-stocked catalog)
+    this.inventoryItems = this.inventoryItems.map(item => ({
+      ...item,
+      currentStock: 0,
+      allocatedStock: 0,
+      availableStock: 0
+    }));
+
+    this.persistState();
+
+    return {
+      cleanedSalesCount: prevSales,
+      cleanedLedgerCount: prevLedger,
+      cleanedStaffCount: prevStaff,
       timestamp: new Date().toISOString()
     };
   }

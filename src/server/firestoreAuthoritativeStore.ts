@@ -502,6 +502,115 @@ export class FirestoreAuthoritativeStore {
     }
   }
 
+  public async wipeAllOperationalData(): Promise<{ success: boolean; deletedCount: number; message: string }> {
+    let deletedCount = 0;
+    try {
+      // Register all existing staff IDs as permanently purged so they are never re-imported
+      for (const [id] of this.staffDirectoryStore.entries()) {
+        this.deletedStaffIdsStore.add(id);
+      }
+      try {
+        const cloudDocs = await cloudBridgeListCollection('staffDirectory', 500);
+        for (const cDoc of cloudDocs) {
+          const safeId = String(cDoc.id || '');
+          if (safeId) {
+            this.deletedStaffIdsStore.add(safeId);
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      this.idempotencyStore.clear();
+      this.reconciliationOutbox.clear();
+      this.transactionalStockMirror.clear();
+      this.stockReservations.clear();
+      this.mpesaTransactions.clear();
+      this.staffDirectoryStore.clear();
+      this.unifiedStateDocsStore.clear();
+      this.userActivityLogsStore.clear();
+      this.userSessionMonitorsStore.clear();
+      this.simulatedFailureMode = { active: false, message: '' };
+      this.saveDurableDalState();
+
+      const collectionsToClean = [
+        'sales',
+        'saleItems',
+        'orders',
+        'payments',
+        'fiscalTransactions',
+        'staffDirectory',
+        'inventoryLedger',
+        'stockTransfers',
+        'stockReservations',
+        'mpesaTransactions',
+        'userActivityLogs',
+        'userSessionMonitors'
+      ];
+
+      for (const colName of collectionsToClean) {
+        if (serverDb) {
+          try {
+            const snap = await serverDb.collection(colName).limit(500).get();
+            if (!snap.empty) {
+              const batch = serverDb.batch();
+              snap.docs.forEach(doc => {
+                batch.delete(doc.ref);
+                deletedCount++;
+              });
+              await batch.commit();
+            }
+          } catch {
+            // Non-blocking if offline or permission restricted
+          }
+        }
+
+        try {
+          const cloudDocs = await cloudBridgeListCollection(colName, 500);
+          for (const cDoc of cloudDocs) {
+            const safeId = String(cDoc.id || '');
+            if (safeId) {
+              await cloudBridgeDeleteDoc(colName, safeId);
+              deletedCount++;
+            }
+          }
+        } catch {
+          // Non-blocking if offline or permission restricted
+        }
+      }
+
+      const unifiedDocKeys = ['orders', 'staff', 'inventory', 'sales', 'affiliates', 'employees', 'website_delivery_orders_v1'];
+      for (const key of unifiedDocKeys) {
+        if (serverDb) {
+          try {
+            await serverDb.collection('unifiedState').doc(key).set({
+              key,
+              payloadJson: '[]',
+              recordCount: 0,
+              updatedAt: new Date().toISOString()
+            }, { merge: true });
+          } catch {}
+        }
+        try {
+          await cloudBridgeSetDoc('unifiedState', key, {
+            key,
+            payloadJson: '[]',
+            recordCount: 0,
+            updatedAt: new Date().toISOString()
+          });
+        } catch {}
+      }
+
+      return {
+        success: true,
+        deletedCount,
+        message: `Successfully wiped ${deletedCount} cloud database and local operational records.`
+      };
+    } catch (e) {
+      return { success: false, deletedCount, message: (e as Error).message };
+    }
+  }
+
   public subscribeLiveSyncEvents(
     listener: (event: {
       type: 'STAFF_DIRECTORY_UPDATED' | 'STAFF_DIRECTORY_DELETED' | 'UNIFIED_STATE_UPDATED' | 'USER_ACTIVITY_UPDATED';
@@ -795,6 +904,13 @@ export class FirestoreAuthoritativeStore {
           }
         }
       }
+      if (Array.isArray(parsed.deletedStaffIds)) {
+        for (const id of parsed.deletedStaffIds as string[]) {
+          if (typeof id === 'string' && id) {
+            this.deletedStaffIdsStore.add(id);
+          }
+        }
+      }
     } catch {
       // Initial boot if file does not exist yet
     }
@@ -811,6 +927,7 @@ export class FirestoreAuthoritativeStore {
         stockReservations: Array.from(this.stockReservations.values()).slice(-500),
         mpesaTransactions: Array.from(this.mpesaTransactions.values()).slice(-2000),
         staffDirectory: Array.from(this.staffDirectoryStore.values()),
+        deletedStaffIds: Array.from(this.deletedStaffIdsStore.values()),
         unifiedStateDocs: Array.from(this.unifiedStateDocsStore.values()),
         userActivityLogs: Array.from(this.userActivityLogsStore.values()).slice(-500),
         userSessionMonitors: Array.from(this.userSessionMonitorsStore.values()).slice(-200)
@@ -2825,11 +2942,8 @@ export class FirestoreAuthoritativeStore {
 
     const safeId = String(staffId || record.id || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
     if (!safeId) return false;
-    if (!explicitUpsert && this.deletedStaffIdsStore.has(safeId)) {
+    if (this.deletedStaffIdsStore.has(safeId)) {
       return false;
-    }
-    if (explicitUpsert) {
-      this.deletedStaffIdsStore.delete(safeId);
     }
 
     const existing = this.staffDirectoryStore.get(safeId);
@@ -2905,6 +3019,183 @@ export class FirestoreAuthoritativeStore {
       type: 'STAFF_DIRECTORY_UPDATED',
       payload: { record: normalized }
     });
+
+    return true;
+  }
+
+  public async persistUserRecordToFirestore(
+    userId: string,
+    record: Record<string, unknown>
+  ): Promise<boolean> {
+    if (this.simulatedFailureMode.active) return false;
+    const safeId = String(userId || record.id || '').replace(/[^a-zA-Z0-9_@.-]/g, '_').slice(0, 120);
+    if (!safeId) return false;
+    const nowIso = new Date().toISOString();
+    const normalized: Record<string, unknown> = {
+      ...record,
+      id: safeId,
+      email: String(record.email || '').trim().toLowerCase(),
+      name: String(record.name || 'System User').trim(),
+      role: String(record.role || 'STAFF'),
+      department: String(record.department || 'BRANCH_MANAGER'),
+      branchId: String(record.branchId || 'branch-hq-main'),
+      organizationId: String(record.organizationId || 'org-merchant-vaairo-hq'),
+      mfaEnabled: typeof record.mfaEnabled === 'boolean' ? record.mfaEnabled : false,
+      active: typeof record.active === 'boolean' ? record.active : true,
+      lastLoginAt: record.lastLoginAt || nowIso,
+      updatedAt: record.updatedAt || nowIso
+    };
+
+    if (this.enabled) {
+      let cloudCommitted = false;
+      try {
+        if (serverDb) {
+          await serverDb.collection('users').doc(safeId).set(normalized, { merge: true });
+          cloudCommitted = true;
+        }
+      } catch {}
+
+      if (!cloudCommitted) {
+        try {
+          await cloudBridgeSetDoc('users', safeId, normalized);
+          cloudCommitted = true;
+        } catch {
+          // non-blocking
+        }
+      }
+
+      // Also ensure organization membership is persisted
+      const membershipId = `mem_${safeId}_${normalized.organizationId}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
+      const membershipDoc = {
+        id: membershipId,
+        userId: safeId,
+        organizationId: normalized.organizationId,
+        role: normalized.role,
+        department: normalized.department,
+        branchId: normalized.branchId,
+        status: 'ACTIVE',
+        updatedAt: nowIso
+      };
+      try {
+        if (serverDb) await serverDb.collection('organizationMemberships').doc(membershipId).set(membershipDoc, { merge: true });
+        await cloudBridgeSetDoc('organizationMemberships', membershipId, membershipDoc);
+      } catch {}
+    }
+
+    return true;
+  }
+
+  public async persistProductRecordToFirestore(
+    productId: string,
+    product: Record<string, unknown>,
+    scanMetadata?: Record<string, unknown>
+  ): Promise<boolean> {
+    if (this.simulatedFailureMode.active) return false;
+    const safeId = String(productId || product.id || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
+    if (!safeId) return false;
+    const nowIso = new Date().toISOString();
+
+    const normalized: Record<string, unknown> = {
+      ...product,
+      id: safeId,
+      barcode: String(product.barcode || '').trim(),
+      sku: String(product.sku || '').trim(),
+      name: String(product.name || '').trim(),
+      category: String(product.category || 'IPS'),
+      updatedAt: nowIso
+    };
+
+    if (scanMetadata) {
+      normalized.lastScannedAt = nowIso;
+      normalized.lastScannedBranchId = scanMetadata.branchId || 'branch-hq-main';
+      normalized.lastScanType = scanMetadata.scanType || 'SINGLE_BOTTLE';
+      normalized.scanCount = Number(product.scanCount || 0) + 1;
+    }
+
+    if (this.enabled) {
+      // 1. Full normalized document in /products
+      try {
+        if (serverDb) await serverDb.collection('products').doc(safeId).set(normalized, { merge: true });
+        await cloudBridgeSetDoc('products', safeId, normalized);
+      } catch {}
+
+      // 2. Public product catalogue in /productsPublic (commercial pricing stripped)
+      const publicClean = { ...normalized };
+      delete (publicClean as any).warehouseCostKes;
+      delete (publicClean as any).distributorPriceKes;
+      delete (publicClean as any).marginPercent;
+      try {
+        if (serverDb) await serverDb.collection('productsPublic').doc(safeId).set(publicClean, { merge: true });
+        await cloudBridgeSetDoc('productsPublic', safeId, publicClean);
+      } catch {}
+
+      // 3. Private product catalogue in /productsPrivate (full margins and wholesale costs)
+      try {
+        if (serverDb) await serverDb.collection('productsPrivate').doc(safeId).set(normalized, { merge: true });
+        await cloudBridgeSetDoc('productsPrivate', safeId, normalized);
+      } catch {}
+
+      // 4. If scanned, also log scan event to /scanHistory
+      if (scanMetadata) {
+        const scanId = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const scanDoc = {
+          id: scanId,
+          productId: safeId,
+          productName: normalized.name,
+          barcode: normalized.barcode,
+          scannedAt: nowIso,
+          ...scanMetadata
+        };
+        try {
+          if (serverDb) await serverDb.collection('scanHistory').doc(scanId).set(scanDoc);
+          await cloudBridgeSetDoc('scanHistory', scanId, scanDoc);
+        } catch {}
+      }
+    }
+
+    return true;
+  }
+
+  public async persistDocumentRecordToFirestore(
+    documentType: 'ORDER' | 'ETIMS' | 'COMMERCIAL_INVOICE' | 'SUPPLY_INVOICE' | 'QUOTE' | 'STOCK_TRANSFER' | 'PURCHASE_ORDER' | 'STOCK_AUDIT',
+    docId: string,
+    payload: Record<string, unknown>
+  ): Promise<boolean> {
+    if (this.simulatedFailureMode.active) return false;
+    const safeId = String(docId || payload.id || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
+    if (!safeId) return false;
+    const nowIso = new Date().toISOString();
+
+    const normalized = {
+      ...payload,
+      id: safeId,
+      updatedAt: payload.updatedAt || nowIso
+    };
+
+    const targetCollection =
+      documentType === 'ORDER' ? 'orders' :
+      documentType === 'ETIMS' ? 'etimsInvoices' :
+      documentType === 'COMMERCIAL_INVOICE' ? 'commercialInvoices' :
+      documentType === 'SUPPLY_INVOICE' ? 'supplyInvoices' :
+      documentType === 'QUOTE' ? 'commercialQuotes' :
+      documentType === 'STOCK_TRANSFER' ? 'stockTransfers' :
+      documentType === 'PURCHASE_ORDER' ? 'purchaseOrders' :
+      documentType === 'STOCK_AUDIT' ? 'stockAuditSessions' : 'documents';
+
+    if (this.enabled) {
+      try {
+        if (serverDb) await serverDb.collection(targetCollection).doc(safeId).set(normalized, { merge: true });
+        await cloudBridgeSetDoc(targetCollection, safeId, normalized);
+      } catch {}
+
+      // For orders, also mirror to sales collection
+      if (documentType === 'ORDER') {
+        try {
+          if (serverDb) await serverDb.collection('sales').doc(safeId).set(normalized, { merge: true });
+          await cloudBridgeSetDoc('sales', safeId, normalized);
+        } catch {}
+      }
+    }
 
     return true;
   }
