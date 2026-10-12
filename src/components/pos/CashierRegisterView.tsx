@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { Product, HeldCart, StockCategory } from '../../types';
-import { CartItem } from '../../context/ErpContext';
+import { CartItem, useErp } from '../../context/ErpContext';
 import { formatKes } from '../../utils/kenyaTax';
 import { ProductImage } from '../common/ProductImage';
+import { AttachAlcoholBillModal } from '../restaurant/AttachAlcoholBillModal';
 import { 
   Barcode, 
   ShoppingCart, 
@@ -28,7 +29,11 @@ import {
   UserCheck,
   Send,
   Lock,
-  ArrowRight
+  ArrowRight,
+  Utensils,
+  Wine,
+  ChefHat,
+  Store
 } from 'lucide-react';
 import { detectKenyanMobileCarrier, sanitizeAndControlKenyanMobileInput } from '../../utils/kenyanMobileCarrier';
 
@@ -43,7 +48,6 @@ export interface CashierRegisterViewProps {
   handleBarcodeSubmit: (e: React.FormEvent) => void;
   posBarcodeInputRef: React.RefObject<HTMLInputElement | null>;
   processScannedBarcode: (barcode: string) => void;
-  quickScanSamples: { label: string; code: string; price: string }[];
   lastPinnedPosScan: {
     product: Product;
     scannedCode: string;
@@ -122,7 +126,7 @@ export interface CashierRegisterViewProps {
   products: Product[];
   inventoryItems: any[];
   onOpenCatalogLookup: () => void;
-  onSwitchToCatalogView: () => void;
+  onSwitchToCatalogView?: () => void;
 }
 
 export const CashierRegisterView: React.FC<CashierRegisterViewProps> = ({
@@ -136,7 +140,6 @@ export const CashierRegisterView: React.FC<CashierRegisterViewProps> = ({
   handleBarcodeSubmit,
   posBarcodeInputRef,
   processScannedBarcode,
-  quickScanSamples,
   lastPinnedPosScan,
   setLastPinnedPosScan,
   justScannedProductId,
@@ -194,125 +197,173 @@ export const CashierRegisterView: React.FC<CashierRegisterViewProps> = ({
   onOpenCatalogLookup,
   onSwitchToCatalogView
 }) => {
+  const {
+    attachedAlcoholBill,
+    setAttachedAlcoholBill,
+    restaurantTableNumber,
+    setRestaurantTableNumber,
+    restaurantFoodCategories,
+    restaurantFoodItems,
+    addFoodToCart
+  } = useErp();
+
   const [showCustomerDetails, setShowCustomerDetails] = useState(false);
+  const [isAttachAlcoholModalOpen, setIsAttachAlcoholModalOpen] = useState(false);
+  const [isFoodMenuModalOpen, setIsFoodMenuModalOpen] = useState(false);
+  const [selectedFoodCategory, setSelectedFoodCategory] = useState<string>('ALL');
+  const [foodSearchQuery, setFoodSearchQuery] = useState('');
   const posCarrier = detectKenyanMobileCarrier(customerPhone);
+
+  const attachedAlcoholTotal = attachedAlcoholBill ? attachedAlcoholBill.totalKes : 0;
+  const effectiveGrandTotal = subtotal + attachedAlcoholTotal;
 
   return (
     <div className="space-y-4">
-      {/* 1. TOP CASHIER REGISTER STATUS & UTILITY COMMAND BAR */}
-      <div className="bg-white rounded-2xl border-2 border-[#0A006E]/20 p-3.5 sm:p-4 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
-        {/* Left: Register Till Identity & Active State */}
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-11 h-11 rounded-xl bg-[#0A006E] text-[#FFDE00] flex items-center justify-center font-montserrat font-black text-sm shrink-0 shadow-xs border border-[#FFDE00]/30">
-            POS
-          </div>
-          <div className="min-w-0 space-y-0.5">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-montserrat font-black text-slate-900 text-sm sm:text-base tracking-tight truncate">
-                LANE 01 • RETAIL REGISTER
-              </span>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-300 font-montserrat font-black text-[10px] uppercase">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                </span>
-                <span>Ready to Scan</span>
-              </span>
+      {/* 1. TOP CASHIER REGISTER STATUS & UTILITY COMMAND BAR (Matches Branch Manager Hero Card Style) */}
+      <div className="bg-[#FFDE00] rounded-2xl border-2 border-[#0A006E]/15 p-4 sm:p-6 lg:p-7 shadow-md flex flex-col justify-between gap-4 hover-card-lift">
+        <div className="flex items-start sm:items-center justify-between gap-3">
+          <div className="flex items-start sm:items-center gap-3 sm:gap-3.5 min-w-0">
+            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-[#0A006E] text-[#FFDE00] flex items-center justify-center font-black shadow-md shrink-0">
+              <Store className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
-            <div className="text-[11px] text-slate-500 font-medium flex items-center gap-2 truncate">
-              <span>Cashier: <strong className="text-[#0A006E] font-bold">{activeCounterCashierName || currentUser.name}</strong></span>
-              <span>•</span>
-              <span className="truncate">{activeBranch.name}</span>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="font-montserrat font-black italic text-xl sm:text-2xl lg:text-3xl text-[#0A006E] tracking-tight leading-tight">
+                  Branch Retail POS Terminal • Cashier Station
+                </h2>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-600/15 text-[#0A006E] border border-[#0A006E]/20 font-montserrat font-black text-[10px] uppercase">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-600 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-700"></span>
+                  </span>
+                  <span>Ready to Scan</span>
+                </span>
+              </div>
+              <p className="text-xs sm:text-sm text-[#0A006E]/80 mt-0.5 sm:mt-1 max-w-2xl font-semibold">
+                <strong>Retail Checkout Terminal:</strong> Served by <strong className="text-[#0A006E]">{activeCounterCashierName || currentUser.name}</strong> at <strong className="text-[#0A006E]">{activeBranch.name}</strong>. Waiting for scanned items or incoming Sales Representative queue orders.
+              </p>
             </div>
           </div>
         </div>
 
-        {/* Right: Quick Action Controls */}
-        <div className="flex items-center gap-2 flex-wrap shrink-0">
-          {/* Quick Item Lookup / Browse Drawer Button */}
-          <button
-            type="button"
-            onClick={onOpenCatalogLookup}
-            className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 text-[11px] font-montserrat font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
-            title="Open Product Catalog Lookup to search and add drinks manually"
-          >
-            <Search className="w-3.5 h-3.5 text-[#0A006E]" />
-            <span>Item Lookup</span>
-          </button>
+        {/* Action Toolbar Below — Matches Branch Manager Card toolbar */}
+        <div className="pt-3.5 sm:pt-4 border-t border-[#0A006E]/15 flex flex-col lg:flex-row lg:items-center justify-between gap-3 animate-in fade-in">
+          <div className="bg-white/90 p-2 rounded-2xl border border-[#0A006E]/15 shadow-2xs flex flex-wrap items-center gap-2">
+            <span className="text-[10px] sm:text-xs text-[#0A006E] font-montserrat font-black uppercase tracking-wider px-1">
+              Terminal Actions:
+            </span>
+            {/* Restaurant Food Menu Button */}
+            <button
+              type="button"
+              onClick={() => setIsFoodMenuModalOpen(true)}
+              className="px-3 py-1.5 rounded-xl bg-white hover:bg-orange-50 text-orange-950 border border-orange-300 text-xs font-montserrat font-bold flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
+              title="Browse and add restaurant kitchen dishes & food items"
+            >
+              <Utensils className="w-3.5 h-3.5 text-orange-600" />
+              <span>Food Menu</span>
+            </button>
 
-          {/* Rep Orders Queue Button */}
-          {allBranchSalesRepHeldCarts.length > 0 && (
+            {/* Attach Client Alcohol Bill Button */}
+            <button
+              type="button"
+              onClick={() => setIsAttachAlcoholModalOpen(true)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-montserrat font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs ${
+                attachedAlcoholBill
+                  ? 'bg-amber-100 text-amber-950 border-2 border-amber-400 ring-2 ring-amber-300/40'
+                  : 'bg-white hover:bg-amber-50 text-slate-800 border border-slate-300'
+              }`}
+              title="Attach client alcohol bill to this restaurant ticket"
+            >
+              <Wine className="w-3.5 h-3.5 text-amber-700" />
+              <span>{attachedAlcoholBill ? `Alcohol Bill (#${attachedAlcoholBill.billNumber})` : 'Attach Alcohol Bill'}</span>
+            </button>
+
+            {/* Dine-In Table Number Input */}
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white border border-slate-300 text-xs" title="Restaurant dine-in table number printed on receipt">
+              <span className="font-montserrat font-bold text-slate-500 uppercase text-[10px]">Table:</span>
+              <input
+                type="text"
+                value={restaurantTableNumber}
+                onChange={(e) => setRestaurantTableNumber(e.target.value)}
+                placeholder="e.g. T-04"
+                className="w-16 px-1.5 py-0.5 rounded bg-slate-50 border border-slate-200 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-[#0A006E]"
+              />
+            </div>
+
+            {/* Quick Item Lookup / Browse Drawer Button */}
+            <button
+              type="button"
+              onClick={onOpenCatalogLookup}
+              className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-xs font-montserrat font-bold flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
+              title="Open Product Catalog Lookup to search and add drinks manually"
+            >
+              <Search className="w-3.5 h-3.5 text-[#0A006E]" />
+              <span>Item Lookup</span>
+            </button>
+
+            {/* Rep Orders Queue Button */}
+            {allBranchSalesRepHeldCarts.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setIsHeldCartsOpen(prev => !prev)}
+                className="px-3 py-1.5 rounded-xl bg-[#0A006E] hover:bg-[#060046] text-[#FFDE00] border border-[#0A006E] text-xs font-montserrat font-black flex items-center gap-1.5 transition cursor-pointer shadow-xs animate-pulse"
+                title="Incoming orders submitted by Sales Representatives"
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>{allBranchSalesRepHeldCarts.length} Rep Order{allBranchSalesRepHeldCarts.length > 1 ? 's' : ''}</span>
+              </button>
+            )}
+
+            {/* Held Carts Button */}
             <button
               type="button"
               onClick={() => setIsHeldCartsOpen(prev => !prev)}
-              className="px-3 py-1.5 rounded-xl bg-[#FFDE00] hover:bg-yellow-400 text-[#0A006E] border border-[#0A006E]/30 text-[11px] font-montserrat font-black transition flex items-center gap-1.5 cursor-pointer animate-pulse shadow-xs"
-              title="Incoming orders submitted by Sales Representatives"
+              className={`px-3 py-1.5 rounded-xl text-xs font-montserrat font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-2xs ${
+                branchHeldCarts.length > 0
+                  ? 'bg-amber-100 text-amber-950 border-amber-400'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+              }`}
+              title="View Held Orders & Collection Queue"
             >
-              <Clock className="w-3.5 h-3.5" />
-              <span>{allBranchSalesRepHeldCarts.length} Rep Order{allBranchSalesRepHeldCarts.length > 1 ? 's' : ''}</span>
+              <PauseCircle className="w-3.5 h-3.5 text-amber-700" />
+              <span>Held ({branchHeldCarts.length})</span>
             </button>
-          )}
 
-          {/* Held Carts Button */}
-          <button
-            type="button"
-            onClick={() => setIsHeldCartsOpen(prev => !prev)}
-            className={`px-3 py-1.5 rounded-xl text-[11px] font-montserrat font-bold transition flex items-center gap-1.5 border cursor-pointer ${
-              branchHeldCarts.length > 0
-                ? 'bg-amber-50 text-amber-900 border-amber-300'
-                : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
-            }`}
-            title="View Held Orders & Collection Queue"
-          >
-            <PauseCircle className="w-3.5 h-3.5 text-amber-700" />
-            <span>Held ({branchHeldCarts.length})</span>
-          </button>
-
-          {/* Kick Cash Drawer Button */}
-          <button
-            type="button"
-            onClick={handleKickDrawer}
-            className="px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-[#FFDE00] text-[#0A006E] border border-amber-300 text-[11px] font-montserrat font-black transition flex items-center gap-1 cursor-pointer shadow-2xs"
-            title="Send RJ11 Drawer Kick Pulse via ESC/POS"
-          >
-            <KeyRound className="w-3.5 h-3.5 text-amber-700" />
-            <span className="hidden sm:inline">Drawer</span>
-          </button>
-
-          {/* Clear / Void Cart Button */}
-          {cart.length > 0 && (
+            {/* Kick Cash Drawer Button */}
             <button
               type="button"
-              onClick={clearCart}
-              className="px-2.5 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-[11px] font-montserrat font-bold transition flex items-center gap-1 cursor-pointer"
-              title="Clear active register cart"
+              onClick={handleKickDrawer}
+              className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-[#FFDE00] text-[#0A006E] border border-amber-300 text-xs font-montserrat font-black flex items-center gap-1 transition cursor-pointer shadow-2xs"
+              title="Send RJ11 Drawer Kick Pulse via ESC/POS"
             >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Clear</span>
+              <KeyRound className="w-3.5 h-3.5 text-amber-700" />
+              <span className="hidden sm:inline">Drawer</span>
             </button>
-          )}
 
-          {/* Switch Staff PIN */}
-          <button
-            type="button"
-            onClick={openStaffPinPrompt}
-            className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-[11px] font-montserrat font-bold transition flex items-center gap-1 cursor-pointer"
-            title="Switch cashier login PIN"
-          >
-            <Lock className="w-3.5 h-3.5 text-slate-600" />
-            <span className="hidden sm:inline">Switch</span>
-          </button>
+            {/* Clear / Void Cart Button */}
+            {cart.length > 0 && (
+              <button
+                type="button"
+                onClick={clearCart}
+                className="px-2.5 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-montserrat font-bold flex items-center gap-1 transition cursor-pointer"
+                title="Clear active register cart"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Clear</span>
+              </button>
+            )}
 
-          {/* View Mode Toggle: Clean Register vs Catalog Grid */}
-          <button
-            type="button"
-            onClick={onSwitchToCatalogView}
-            className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 text-[10px] font-montserrat font-bold transition flex items-center gap-1 cursor-pointer"
-            title="Switch to Product Catalog Grid view"
-          >
-            <Layers className="w-3 h-3" />
-            <span>Catalog Grid</span>
-          </button>
+            {/* Switch Staff PIN */}
+            <button
+              type="button"
+              onClick={openStaffPinPrompt}
+              className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-montserrat font-bold flex items-center gap-1 transition cursor-pointer"
+              title="Switch cashier login PIN"
+            >
+              <Lock className="w-3.5 h-3.5 text-slate-600" />
+              <span className="hidden sm:inline">Switch PIN</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -495,26 +546,6 @@ export const CashierRegisterView: React.FC<CashierRegisterViewProps> = ({
               </button>
             </form>
 
-            {/* Quick Test Barcode Pills (1-tap simulation of real bottle scans) */}
-            <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-              <span className="text-[10px] font-montserrat font-black text-slate-400 uppercase shrink-0">
-                1-Tap Quick Scans:
-              </span>
-              {quickScanSamples.map((sample) => (
-                <button
-                  key={sample.code}
-                  type="button"
-                  onClick={() => processScannedBarcode(sample.code)}
-                  className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-[#FFDE00] text-slate-700 hover:text-[#0A006E] border border-slate-200 hover:border-[#0A006E] text-[10px] font-montserrat font-bold transition flex items-center gap-1 cursor-pointer active:scale-95 shadow-2xs"
-                  title={`Simulate scan: ${sample.label} (${sample.code})`}
-                >
-                  <Barcode className="w-3 h-3 shrink-0" />
-                  <span>{sample.label}</span>
-                  <span className="font-mono text-[9px] text-emerald-700 font-bold">KES {sample.price}</span>
-                </button>
-              ))}
-            </div>
-
             {/* Pinned Verification Card for the Last Scanned Item */}
             {lastPinnedPosScan && (
               <div className="p-3.5 rounded-xl bg-[#0A006E] text-white border-2 border-[#FFDE00] flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in shadow-md">
@@ -562,6 +593,48 @@ export const CashierRegisterView: React.FC<CashierRegisterViewProps> = ({
               </div>
             )}
           </div>
+
+          {/* Attached Client Alcohol Bill Banner */}
+          {attachedAlcoholBill && (
+            <div className="p-3.5 rounded-2xl bg-amber-50 border-2 border-amber-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs animate-in fade-in">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-[#0A006E] text-[#FFDE00] flex items-center justify-center font-black text-sm shrink-0 shadow-xs">
+                  🍷
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-montserrat font-black text-xs sm:text-sm text-slate-900">
+                      Attached Client Alcohol Bill: #{attachedAlcoholBill.billNumber}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 font-mono font-bold text-[10px]">
+                      +{formatKes(attachedAlcoholBill.totalKes)}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-600 mt-0.5 truncate">
+                    {attachedAlcoholBill.items.length} drink item(s) • Source: {attachedAlcoholBill.branchName || 'Bar Counter'}
+                    {restaurantTableNumber ? ` • Table: ${restaurantTableNumber}` : ''}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                <button
+                  type="button"
+                  onClick={() => setIsAttachAlcoholModalOpen(true)}
+                  className="px-2.5 py-1 rounded-lg bg-white hover:bg-amber-100 text-[#0A006E] border border-amber-300 text-xs font-montserrat font-bold transition cursor-pointer"
+                >
+                  View Drinks
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAttachedAlcoholBill(null)}
+                  className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-montserrat font-bold transition cursor-pointer"
+                  title="Detach this alcohol bill from the order"
+                >
+                  Detach
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* THE MIDDLE WORKSTATION: SCANNED ITEMS LIST / REGISTER TAPE */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-[440px]">
@@ -617,7 +690,7 @@ export const CashierRegisterView: React.FC<CashierRegisterViewProps> = ({
                   Waiting for items to be scanned...
                 </h4>
                 <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto mb-6 leading-relaxed">
-                  Point your physical USB/Bluetooth barcode scanner at bottle, enter SKU above, or click any quick-scan test button above to add items to this checkout list.
+                  Point your physical USB/Bluetooth barcode scanner at bottle, enter SKU/barcode above, or recall orders submitted by Sales Representatives.
                 </p>
 
                 {/* Helpful POS Indicators */}
@@ -807,12 +880,31 @@ export const CashierRegisterView: React.FC<CashierRegisterViewProps> = ({
                 <span className="text-emerald-400">VAT 16% Included</span>
               </div>
               <div className="font-montserrat font-black text-3xl sm:text-4xl text-[#FFDE00] tracking-tight tabular-nums leading-none drop-shadow-xs">
-                {formatKes(subtotal)}
+                {formatKes(effectiveGrandTotal)}
               </div>
-              <div className="flex items-center justify-between text-[11px] text-slate-300 pt-2 border-t border-slate-800">
-                <span>Subtotal: {formatKes(subtotal - vatAmount)}</span>
-                <span>16% VAT: {formatKes(vatAmount)}</span>
-              </div>
+              {attachedAlcoholTotal > 0 ? (
+                <div className="space-y-1 text-[11px] pt-2 border-t border-slate-800 text-slate-300">
+                  <div className="flex justify-between">
+                    <span>Food Items Subtotal:</span>
+                    <span className="font-mono">{formatKes(subtotal)}</span>
+                  </div>
+                  <div className="flex justify-between text-[#FFDE00] font-bold">
+                    <span>+ Attached Alcohol Bill (#{attachedAlcoholBill?.billNumber}):</span>
+                    <span className="font-mono">+{formatKes(attachedAlcoholTotal)}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between text-[11px] text-slate-300 pt-2 border-t border-slate-800">
+                  <span>Subtotal: {formatKes(subtotal - vatAmount)}</span>
+                  <span>16% VAT: {formatKes(vatAmount)}</span>
+                </div>
+              )}
+              {restaurantTableNumber && (
+                <div className="pt-1.5 border-t border-slate-800 text-[10px] font-mono text-orange-300 flex justify-between">
+                  <span>Dine-In Table:</span>
+                  <span className="font-bold">{restaurantTableNumber}</span>
+                </div>
+              )}
             </div>
 
             {/* Receipt Attribution Bar */}
@@ -1125,7 +1217,7 @@ export const CashierRegisterView: React.FC<CashierRegisterViewProps> = ({
                 className="w-full py-3.5 px-4 bg-[#FFDE00] hover:bg-yellow-400 active:scale-95 text-[#0A006E] border-2 border-[#0A006E]/30 rounded-xl font-montserrat font-black text-sm sm:text-base shadow-lg disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-2 cursor-pointer"
               >
                 <CheckCircle2 className="w-5 h-5" />
-                <span>COLLECT PAYMENT &amp; PRINT ({formatKes(subtotal)})</span>
+                <span>COLLECT PAYMENT &amp; PRINT ({formatKes(effectiveGrandTotal)})</span>
               </button>
 
               <div className="grid grid-cols-2 gap-2">
@@ -1154,6 +1246,155 @@ export const CashierRegisterView: React.FC<CashierRegisterViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Attach Alcohol Bill Modal */}
+      <AttachAlcoholBillModal
+        isOpen={isAttachAlcoholModalOpen}
+        onClose={() => setIsAttachAlcoholModalOpen(false)}
+        onAttachBill={(bill) => {
+          setAttachedAlcoholBill(bill);
+          setIsAttachAlcoholModalOpen(false);
+        }}
+        currentAttachedBill={attachedAlcoholBill}
+        onRemoveAttachedBill={() => setAttachedAlcoholBill(null)}
+      />
+
+      {/* Fast Restaurant Food Menu Drawer / Modal */}
+      {isFoodMenuModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl sm:rounded-3xl border-2 border-[#0A006E]/20 shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+            {/* Header */}
+            <div className="bg-[#0A006E] text-white p-4 sm:p-5 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-[#FFDE00] text-[#0A006E] flex items-center justify-center">
+                  <Utensils className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-montserrat font-black text-base sm:text-lg text-white">
+                    Restaurant Kitchen &amp; Food Menu
+                  </h3>
+                  <p className="text-xs text-slate-200">
+                    Select dishes to add directly into current register order ({restaurantFoodItems.length} available items)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsFoodMenuModalOpen(false)}
+                className="text-white/80 hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Categories & Search */}
+            <div className="p-4 bg-slate-50 border-b border-slate-200 space-y-3">
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={foodSearchQuery}
+                    onChange={(e) => setFoodSearchQuery(e.target.value)}
+                    placeholder="Search dishes (e.g. Nyama Choma, Fries, Chicken, Ugali, Fish)..."
+                    className="w-full pl-9 pr-3 py-2 bg-white border border-slate-300 rounded-xl text-xs sm:text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#0A006E]"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                <button
+                  type="button"
+                  onClick={() => setSelectedFoodCategory('ALL')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-montserrat font-bold whitespace-nowrap transition cursor-pointer ${
+                    selectedFoodCategory === 'ALL'
+                      ? 'bg-[#0A006E] text-white shadow-2xs'
+                      : 'bg-white text-slate-700 hover:bg-slate-200 border border-slate-200'
+                  }`}
+                >
+                  All Categories ({restaurantFoodItems.length})
+                </button>
+                {restaurantFoodCategories.map(cat => (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setSelectedFoodCategory(cat.id)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-montserrat font-bold whitespace-nowrap transition cursor-pointer ${
+                      selectedFoodCategory === cat.id
+                        ? 'bg-[#0A006E] text-white shadow-2xs'
+                        : 'bg-white text-slate-700 hover:bg-slate-200 border border-slate-200'
+                    }`}
+                  >
+                    {cat.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Dishes Grid */}
+            <div className="p-4 overflow-y-auto flex-1 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+              {restaurantFoodItems
+                .filter(item => {
+                  if (selectedFoodCategory !== 'ALL' && item.categoryId !== selectedFoodCategory) return false;
+                  if (foodSearchQuery.trim()) {
+                    const q = foodSearchQuery.toLowerCase();
+                    return item.name.toLowerCase().includes(q) || (item.description && item.description.toLowerCase().includes(q));
+                  }
+                  return true;
+                })
+                .map(item => (
+                  <div
+                    key={item.id}
+                    className="p-3 rounded-2xl border border-slate-200 bg-white hover:border-[#0A006E]/40 hover:shadow-sm transition flex flex-col justify-between gap-2.5"
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-2">
+                        <h4 className="font-montserrat font-black text-xs sm:text-sm text-slate-900 leading-snug">
+                          {item.name}
+                        </h4>
+                        <span className="font-mono font-black text-xs text-[#0A006E] shrink-0 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-200">
+                          {formatKes(item.priceKes)}
+                        </span>
+                      </div>
+                      {item.description && (
+                        <p className="text-[11px] text-slate-500 line-clamp-2 mt-1">
+                          {item.description}
+                        </p>
+                      )}
+                      <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-2">
+                        <span>Portion: {item.servingPortion || 'Standard'}</span>
+                        {item.preparationTimeMinutes && <span>• {item.preparationTimeMinutes} mins</span>}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        addFoodToCart(item, 1);
+                      }}
+                      className="w-full py-1.5 rounded-xl bg-orange-50 hover:bg-orange-600 text-orange-950 hover:text-white border border-orange-300 hover:border-orange-600 font-montserrat font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add to Order</span>
+                    </button>
+                  </div>
+                ))}
+            </div>
+
+            {/* Footer */}
+            <div className="p-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs">
+              <div className="text-slate-600">
+                Cart items in register: <strong className="text-[#0A006E]">{cart.length}</strong>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsFoodMenuModalOpen(false)}
+                className="px-4 py-2 rounded-xl bg-[#0A006E] hover:bg-[#060046] text-white font-montserrat font-bold cursor-pointer transition shadow-2xs"
+              >
+                Done Adding Dishes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

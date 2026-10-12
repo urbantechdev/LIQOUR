@@ -74,7 +74,7 @@ export const Sidebar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
   } = useErp();
   const permissions = getRolePermissions(currentRole, currentDepartment);
   const isStaffPosOnly =
-    (currentRole === 'STAFF' && (currentDepartment === 'POS' || currentDepartment === 'AFFILIATES')) ||
+    (currentRole === 'STAFF' && currentDepartment === 'AFFILIATES') ||
     posStationMode === 'SALES_LADY';
   const isSalesRepLoggedIn =
     currentDepartment === 'AFFILIATES' || posStationMode === 'SALES_LADY';
@@ -151,9 +151,21 @@ export const Sidebar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                 ? 'bg-[#FFDE00] text-[#0A006E]' 
                 : currentRole === 'ACCOUNTANT' 
                 ? 'bg-[#012606] text-white' 
+                : currentDepartment === 'POS'
+                ? 'bg-[#0A006E] text-[#FFDE00]'
+                : currentDepartment === 'BRANCH_MANAGER'
+                ? 'bg-[#0A006E] text-white'
                 : 'bg-[#FFDE00] text-[#0A006E] border border-[#0A006E]/20'
             }`}>
-              {currentRole === 'SUPER_ADMIN' ? 'Super Admin' : currentRole === 'ACCOUNTANT' ? 'Accountant' : 'Sales Representative'}
+              {currentRole === 'SUPER_ADMIN'
+                ? 'Super Admin'
+                : currentRole === 'ACCOUNTANT'
+                ? 'Accountant'
+                : currentDepartment === 'POS'
+                ? 'Counter Cashier'
+                : currentDepartment === 'BRANCH_MANAGER'
+                ? 'Branch Manager'
+                : 'Sales Representative'}
             </span>
           </div>
 
@@ -163,7 +175,7 @@ export const Sidebar: React.FC<Props> = ({ activeTab, onSelectTab }) => {
                 {currentUser.name}
               </div>
               <div className="text-[10px] text-slate-600 font-mono truncate mt-0.5">
-                Role: <strong className="text-[#0A006E]">{currentDepartment === 'AFFILIATES' ? 'Sales Representative' : currentDepartment.replace('_', ' ')}</strong>
+                Role: <strong className="text-[#0A006E]">{currentDepartment === 'AFFILIATES' ? 'Sales Representative' : currentDepartment === 'POS' ? 'Counter Cashier' : currentDepartment.replace('_', ' ')}</strong>
               </div>
             </div>
 

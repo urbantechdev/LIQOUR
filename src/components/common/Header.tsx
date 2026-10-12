@@ -175,11 +175,10 @@ export const Header: React.FC<Props> = ({ activeTab = 'DASHBOARD', onSelectTab, 
     (currentRole === 'STAFF' && currentDepartment === 'INVENTORY') || currentRole === 'SUPER_ADMIN';
   // Super Admin only header actions (New Branch, Onboard Suppliers / Distributors / Staff across enterprise)
   const isAdminOrAccountant = currentRole === 'SUPER_ADMIN';
-  // Staff POS login (POS Cashier or Sales Representative) — strictly show ONLY User and Logout icon in Header
+  // Sales Representative login — strictly show ONLY User and Logout icon in Header (Cashier gets full header with branch switcher like Branch Manager)
   const isStaffPos =
     isAuthenticated &&
-    currentRole === 'STAFF' &&
-    (currentDepartment === 'POS' || currentDepartment === 'AFFILIATES');
+    ((currentRole === 'STAFF' && currentDepartment === 'AFFILIATES') || posStationMode === 'SALES_LADY');
 
   const pendingNotifications = restockRequests.filter(r => {
     if (r.status !== 'PENDING' && r.status !== 'APPROVED' && r.status !== 'DISPATCHED') return false;

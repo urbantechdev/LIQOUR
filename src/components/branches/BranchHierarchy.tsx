@@ -33,9 +33,13 @@ import {
   Menu,
   X,
   Tag,
-  Search
+  Search,
+  Utensils,
+  ChevronRight,
+  Sparkles
 } from 'lucide-react';
 import { StaffActionButtons, StaffStatusBadge } from '../common/StaffLifecycleActionsModal';
+import { RestaurantFoodManager } from '../restaurant/RestaurantFoodManager';
 
 export const BranchHierarchy: React.FC = () => {
   const { 
@@ -69,8 +73,8 @@ export const BranchHierarchy: React.FC = () => {
   const [draftProductPrices, setDraftProductPrices] = useState<Record<string, { retail?: string; wholesale?: string }>>({});
   const [pricingFeedback, setPricingFeedback] = useState<string | null>(null);
 
-  // Counter Cashier Creation & 6-Digit PIN state (Branch Manager & Admin)
-  const canCreateCounterCashier = currentRole === 'SUPER_ADMIN' || currentDepartment === 'BRANCH_MANAGER';
+  // Counter Cashier Creation & 6-Digit PIN state (Branch Manager, Cashier & Admin)
+  const canCreateCounterCashier = currentRole === 'SUPER_ADMIN' || currentDepartment === 'BRANCH_MANAGER' || currentDepartment === 'POS';
   const [showCreateCashierForm, setShowCreateCashierForm] = useState(false);
   const [cashierName, setCashierName] = useState('');
   const [cashierCode, setCashierCode] = useState('');
@@ -158,7 +162,7 @@ export const BranchHierarchy: React.FC = () => {
   };
 
   // New branch form state
-  const [presetCategory, setPresetCategory] = useState<'LIQUOR_SHOP' | 'DISTRIBUTOR' | 'STORE' | 'WAREHOUSE'>('LIQUOR_SHOP');
+  const [presetCategory, setPresetCategory] = useState<'LIQUOR_SHOP' | 'DISTRIBUTOR' | 'STORE' | 'WAREHOUSE' | 'RESTAURANT'>('LIQUOR_SHOP');
   const [branchNumber, setBranchNumber] = useState<number>(1);
   const [name, setName] = useState('Liquor Shop 1');
   const [code, setCode] = useState('LS-01');
@@ -169,6 +173,10 @@ export const BranchHierarchy: React.FC = () => {
   const [kraPin, setKraPin] = useState('P051982736Z');
   const [managerName, setManagerName] = useState('');
   const [minWholesaleThresholdKes, setMinWholesaleThresholdKes] = useState(50000);
+  const [restaurantCuisineType, setRestaurantCuisineType] = useState<string>('Kenyan Local & Nyama Choma');
+  const [restaurantTableCount, setRestaurantTableCount] = useState<number>(25);
+  const [restaurantAllowAlcoholBilling, setRestaurantAllowAlcoholBilling] = useState<boolean>(true);
+  const [selectedRestaurantForFood, setSelectedRestaurantForFood] = useState<Branch | null>(null);
   const [selectedServiceZone, setSelectedServiceZone] = useState<string>(
     DELIVERY_ZONE_GEO_DIRECTORY[0].label
   );
@@ -226,6 +234,7 @@ export const BranchHierarchy: React.FC = () => {
   // - Tier 2: Main Branch (Head Office)
   // - Tier 3: Branches (Merchants operating under Main Branch Head Office)
   // - Tier 4: Shops (Retail Liquor Outlets strictly created under a Branch)
+  // - Tier 5: Independent Restaurants (Food Menus, Categories, Custom Pricing & Client Alcohol Bills)
   const visibleBranches = isBranchScopedManager
     ? branches.filter(b => allowedBranchIds.has(b.id))
     : branches;
@@ -233,6 +242,7 @@ export const BranchHierarchy: React.FC = () => {
   const mainStores = visibleBranches.filter(b => b.tier === 'MAIN_STORE');
   const distributors = visibleBranches.filter(b => b.tier === 'DISTRIBUTOR');
   const liquorStores = visibleBranches.filter(b => b.tier === 'LIQUOR_STORE');
+  const restaurants = visibleBranches.filter(b => b.tier === 'RESTAURANT' || b.isRestaurant);
   const parentEligibleBranches = [...distributors, ...mainStores];
   const headOfficeMainBranch = mainStores[0] || branches[0];
 
@@ -241,7 +251,7 @@ export const BranchHierarchy: React.FC = () => {
   );
 
   const applyBranchPreset = (
-    category: 'LIQUOR_SHOP' | 'DISTRIBUTOR' | 'STORE' | 'WAREHOUSE',
+    category: 'LIQUOR_SHOP' | 'DISTRIBUTOR' | 'STORE' | 'WAREHOUSE' | 'RESTAURANT',
     num: number,
     explicitParentBranch?: Branch
   ) => {
@@ -283,6 +293,14 @@ export const BranchHierarchy: React.FC = () => {
       setSelectedParentBranchId('');
       setName(num === 1 ? 'Main Branch (Head Office)' : `Main Branch ${num} (Head Office)`);
       setCode(`MB-HQ-${padded}`);
+    } else if (category === 'RESTAURANT') {
+      setTier('RESTAURANT');
+      setSelectedParentBranchId('');
+      setName(num === 1 ? 'Restaurant & Grill 1 (Independent)' : `Restaurant & Grill ${num} (Independent)`);
+      setCode(`REST-${padded}`);
+      setRestaurantCuisineType('Kenyan Local & Nyama Choma');
+      setRestaurantTableCount(25);
+      setRestaurantAllowAlcoholBilling(true);
     } else {
       setTier('WAREHOUSE');
       setSelectedParentBranchId(headOfficeMainBranch?.id || '');
@@ -299,7 +317,7 @@ export const BranchHierarchy: React.FC = () => {
     setIsHeroMenuOpen(false);
   };
 
-  const canEditRules = currentRole === 'SUPER_ADMIN' || currentDepartment === 'BRANCH_MANAGER';
+  const canEditRules = currentRole === 'SUPER_ADMIN' || currentDepartment === 'BRANCH_MANAGER' || currentDepartment === 'POS';
 
   const handleCreateBranch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -323,6 +341,10 @@ export const BranchHierarchy: React.FC = () => {
         code: code.toUpperCase(),
         tier,
         isHeadOffice: tier === 'MAIN_STORE',
+        isRestaurant: tier === 'RESTAURANT',
+        cuisineType: tier === 'RESTAURANT' ? restaurantCuisineType : undefined,
+        tableCount: tier === 'RESTAURANT' ? restaurantTableCount : undefined,
+        allowAlcoholBilling: tier === 'RESTAURANT' ? restaurantAllowAlcoholBilling : true,
         parentBranchId: resolvedParentBranch?.id,
         parentBranchName: resolvedParentBranch?.name,
         location,
@@ -335,6 +357,8 @@ export const BranchHierarchy: React.FC = () => {
             ? 'Head Office Director'
             : tier === 'DISTRIBUTOR'
             ? 'Branch Merchant Manager'
+            : tier === 'RESTAURANT'
+            ? 'Restaurant Head Chef / Manager'
             : 'Shop Manager'),
         allowDirectSales: tier !== 'WAREHOUSE',
         minWholesaleThresholdKes: tier === 'MAIN_STORE' ? minWholesaleThresholdKes : undefined,
@@ -376,111 +400,195 @@ export const BranchHierarchy: React.FC = () => {
   return (
     <div className="space-y-6">
       
-      {/* Header & Add Branch */}
-      <div className="bg-[#FFDE00] rounded-2xl border-2 border-[#0A006E]/15 p-4 sm:p-6 lg:p-8 shadow-md flex flex-col justify-between gap-4 sm:gap-5 hover-card-lift">
-        {/* Text Above + Mobile Hamburger Trigger */}
-        <div className="flex items-start sm:items-center justify-between gap-3">
-          <div className="flex items-start sm:items-center gap-3 sm:gap-3.5 min-w-0">
-            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-[#0A006E] text-[#FFDE00] flex items-center justify-center font-black shadow-md shrink-0">
+      {/* Header & Add Branch Hero */}
+      <div className="bg-[#FFDE00] rounded-2xl sm:rounded-3xl border-2 border-[#0A006E]/15 p-4 sm:p-6 lg:p-7 shadow-md flex flex-col gap-4 sm:gap-5 hover-card-lift relative overflow-hidden">
+        {/* Subtle decorative background watermark */}
+        <div className="absolute -right-8 -bottom-10 pointer-events-none opacity-5 select-none hidden lg:block">
+          <Network className="w-56 h-56 text-[#0A006E]" />
+        </div>
+
+        {/* Top: Icon + Title + Hierarchy Explanation & Architecture Stepper */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-start gap-3 sm:gap-4 min-w-0">
+            <div className="w-11 h-11 sm:w-13 sm:h-13 rounded-2xl bg-[#0A006E] text-[#FFDE00] flex items-center justify-center font-black shadow-md shrink-0 mt-0.5 sm:mt-0 ring-2 ring-[#0A006E]/20">
               <Network className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
-            <div className="min-w-0">
-              <h2 className="font-montserrat font-black italic text-xl sm:text-2xl lg:text-3xl text-[#0A006E] tracking-tight leading-tight">
+            <div className="min-w-0 space-y-1">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#0A006E]/10 text-[#0A006E] font-montserrat font-black text-[10px] tracking-wider uppercase">
+                <Sparkles className="w-3 h-3 text-[#0A006E]" />
+                <span>Enterprise Multi-Tier Architecture</span>
+              </div>
+              <h2 className="font-montserrat font-black italic text-lg sm:text-2xl lg:text-3xl text-[#0A006E] tracking-tight leading-tight">
                 Main Branch (Head Office) • Branches (Merchants) • Shops Hierarchy
               </h2>
-              <p className="text-xs sm:text-sm text-[#0A006E]/80 mt-0.5 sm:mt-1 max-w-2xl font-semibold">
+              <p className="text-xs sm:text-sm text-[#0A006E]/85 max-w-3xl font-semibold leading-relaxed">
                 <strong>Main Branch is the Head Office.</strong> Branches are the <strong>Merchants</strong> operating under Head Office, and <strong>Shops are only created under a Branch</strong>.
               </p>
             </div>
           </div>
 
-          {/* Mobile Hamburger Button to Collapse Hero Menu (< sm) */}
+          {/* Architecture Pipeline / Stepper Pills */}
+          <div className="bg-white/85 backdrop-blur-xs rounded-xl sm:rounded-2xl border border-[#0A006E]/15 p-2 sm:p-2.5 shadow-xs shrink-0 self-start lg:self-center w-full sm:w-auto">
+            <div className="text-[10px] font-black uppercase tracking-wider text-[#0A006E]/70 mb-1.5 px-1 font-montserrat flex items-center justify-between gap-2">
+              <span>Operational Flow &amp; Counts</span>
+              <span className="text-[9px] text-[#1E9E60] font-bold">{visibleBranches.length} Total Entities</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 text-xs font-montserrat font-bold text-[#0A006E]">
+              <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-50/90 text-blue-900 border border-blue-200">
+                <Building2 className="w-3 h-3 text-blue-700 shrink-0" />
+                <span className="text-[11px]">HQ ({mainStores.length})</span>
+              </div>
+              <ChevronRight className="w-3 h-3 text-[#0A006E]/40 shrink-0" />
+              <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-50/90 text-amber-900 border border-amber-200">
+                <Layers className="w-3 h-3 text-amber-700 shrink-0" />
+                <span className="text-[11px]">Merchants ({distributors.length})</span>
+              </div>
+              <ChevronRight className="w-3 h-3 text-[#0A006E]/40 shrink-0" />
+              <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-50/90 text-emerald-900 border border-emerald-200">
+                <Store className="w-3 h-3 text-emerald-700 shrink-0" />
+                <span className="text-[11px]">Shops ({liquorStores.length})</span>
+              </div>
+              <span className="text-[#0A006E]/30 hidden sm:inline">•</span>
+              <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-orange-50/90 text-orange-900 border border-orange-200">
+                <Utensils className="w-3 h-3 text-orange-700 shrink-0" />
+                <span className="text-[11px]">Dining ({restaurants.length})</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Primary Action Buttons (Responsive on Mobile & Desktop) */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2.5 pt-1">
           <button
             type="button"
-            onClick={() => setIsHeroMenuOpen(prev => !prev)}
-            aria-label="Toggle Distribution Hero Menu"
-            className="sm:hidden w-10 h-10 rounded-xl bg-[#0A006E] text-[#FFDE00] flex items-center justify-center shadow-md shrink-0 cursor-pointer"
+            onClick={() => {
+              const targetId = activeBranchId || branches[0]?.id || 'CLASS_MATRIX_PREVIEW';
+              setPricingModalBranchId(targetId);
+              setPricingModalTab(branches.length > 0 ? 'BRANCH_OVERRIDES' : 'CLASS_COMPARISON');
+              setIsHeroMenuOpen(false);
+            }}
+            className="w-full sm:w-auto px-4 py-2.5 sm:py-3 bg-white hover:bg-slate-50 active:bg-slate-100 text-[#0A006E] border-2 border-[#0A006E] rounded-xl font-montserrat font-black text-xs flex items-center justify-center gap-2 transition shadow-xs cursor-pointer group"
           >
-            {isHeroMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            <Tag className="w-4 h-4 text-[#1E9E60] shrink-0 transition-transform group-hover:scale-110" />
+            <span className="truncate">Branch Preferred Pricing (Donholm vs Kilimani / Westlands)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              applyBranchPreset('DISTRIBUTOR', distributors.length + 1);
+              setIsAddBranchOpen(true);
+              setIsHeroMenuOpen(false);
+            }}
+            className="w-full sm:w-auto px-5 py-2.5 sm:py-3 bg-[#0A006E] hover:bg-[#060046] active:bg-[#040030] text-white rounded-xl font-montserrat font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition shadow-sm shrink-0 cursor-pointer group"
+          >
+            <Plus className="w-4 h-4 text-[#FFDE00] shrink-0 transition-transform group-hover:rotate-90" />
+            <span>Create Branch (Merchant) or Shop Under Branch</span>
           </button>
         </div>
 
-        {/* Hero Menu Below — Collapsed Inside Hamburger on Mobile, Visible on Desktop */}
-        <div
-          className={`${
-            isHeroMenuOpen ? 'flex' : 'hidden sm:flex'
-          } pt-3.5 sm:pt-4 border-t border-[#0A006E]/15 flex-col lg:flex-row lg:items-center justify-between gap-3 animate-in fade-in`}
-        >
-          <div className="bg-white/90 p-2 rounded-2xl border border-[#0A006E]/15 shadow-2xs space-y-1.5 sm:space-y-0 sm:flex sm:flex-wrap sm:items-center sm:gap-2">
-            <span className="block sm:inline text-[10px] sm:text-xs text-[#0A006E] font-montserrat font-black uppercase tracking-wider px-1">
-              Quick Create:
-            </span>
-            <div className="flex flex-col sm:flex-row sm:items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => {
-                  applyBranchPreset('DISTRIBUTOR', distributors.length + 1);
-                  setIsAddBranchOpen(true);
-                  setIsHeroMenuOpen(false);
-                }}
-                className="px-3 py-2 sm:py-1.5 rounded-xl bg-white hover:bg-amber-50 text-amber-900 border border-amber-400 text-xs font-montserrat font-bold flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
-              >
-                <Layers className="w-3.5 h-3.5 shrink-0" />
-                <span>+ Branch {distributors.length + 1} (Merchant)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const defaultParent = distributors[0] || mainStores[0];
-                  applyBranchPreset('LIQUOR_SHOP', liquorStores.length + 1, defaultParent);
-                  setIsAddBranchOpen(true);
-                  setIsHeroMenuOpen(false);
-                }}
-                className="px-3 py-2 sm:py-1.5 rounded-xl bg-white hover:bg-emerald-50 text-[#1E9E60] border border-[#34D186]/30 text-xs font-montserrat font-bold flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
-              >
-                <Store className="w-3.5 h-3.5 shrink-0" />
-                <span>+ Shop {liquorStores.length + 1} (Under a Branch)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  applyBranchPreset('STORE', mainStores.length + 1);
-                  setIsAddBranchOpen(true);
-                  setIsHeroMenuOpen(false);
-                }}
-                className="px-3 py-2 sm:py-1.5 rounded-xl bg-white hover:bg-blue-50 text-[#0A006E] border border-[#0A006E]/30 text-xs font-montserrat font-bold flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
-              >
-                <Building2 className="w-3.5 h-3.5 shrink-0" />
-                <span>+ Main Branch (Head Office)</span>
-              </button>
+        {/* Quick Create Strip — 4 Clean Responsive Cards (2x2 on Mobile, 4x1 on Desktop) */}
+        <div className="bg-white/95 backdrop-blur-xs rounded-2xl border border-[#0A006E]/15 p-3 sm:p-4 shadow-sm space-y-2.5">
+          <div className="flex items-center justify-between gap-2 px-1">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-[#1E9E60] animate-pulse"></span>
+              <span className="text-[10px] sm:text-xs text-[#0A006E] font-montserrat font-black uppercase tracking-wider">
+                Quick Create:
+              </span>
             </div>
+            <span className="text-[10px] text-slate-500 font-medium hidden sm:inline">
+              Instant 1-Click Entity Templates with Prefilled Codes
+            </span>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-2.5">
+            {/* 1. Branch 1 (Merchant) */}
             <button
               type="button"
-              onClick={() => {
-                const targetId = activeBranchId || branches[0]?.id || 'CLASS_MATRIX_PREVIEW';
-                setPricingModalBranchId(targetId);
-                setPricingModalTab(branches.length > 0 ? 'BRANCH_OVERRIDES' : 'CLASS_COMPARISON');
-                setIsHeroMenuOpen(false);
-              }}
-              className="px-4 py-3 sm:py-2.5 bg-white hover:bg-slate-50 text-[#0A006E] border-2 border-[#0A006E] rounded-xl font-montserrat font-black text-xs flex items-center justify-center gap-2 transition shadow-xs cursor-pointer"
-            >
-              <Tag className="w-4 h-4 text-[#1E9E60] shrink-0" />
-              <span>Branch Preferred Pricing (Donholm vs Kilimani / Westlands)</span>
-            </button>
-
-            <button
               onClick={() => {
                 applyBranchPreset('DISTRIBUTOR', distributors.length + 1);
                 setIsAddBranchOpen(true);
                 setIsHeroMenuOpen(false);
               }}
-              className="px-5 py-3 sm:py-2.5 bg-[#0A006E] hover:bg-[#060046] text-white rounded-xl font-montserrat font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition shadow-sm shrink-0 cursor-pointer"
+              className="p-2.5 sm:p-3 rounded-xl bg-white hover:bg-amber-50 active:bg-amber-100/70 text-amber-950 border border-amber-300/80 hover:border-amber-400 text-left transition shadow-2xs cursor-pointer flex items-center gap-2.5 group"
             >
-              <Plus className="w-4 h-4 text-[#FFDE00] shrink-0" />
-              <span>Create Branch (Merchant) or Shop Under Branch</span>
+              <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <Layers className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="font-montserrat font-black text-xs text-amber-950 flex items-center justify-between">
+                  <span>+ Branch {distributors.length + 1}</span>
+                  <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-amber-200/70 text-amber-900 font-bold">Merchant</span>
+                </div>
+                <div className="text-[10px] text-amber-800/80 truncate font-medium">Wholesale Merchant</div>
+              </div>
+            </button>
+
+            {/* 2. Shop 2 (Under a Branch) */}
+            <button
+              type="button"
+              onClick={() => {
+                const defaultParent = distributors[0] || mainStores[0];
+                applyBranchPreset('LIQUOR_SHOP', liquorStores.length + 1, defaultParent);
+                setIsAddBranchOpen(true);
+                setIsHeroMenuOpen(false);
+              }}
+              className="p-2.5 sm:p-3 rounded-xl bg-white hover:bg-emerald-50 active:bg-emerald-100/70 text-emerald-950 border border-emerald-300/80 hover:border-emerald-400 text-left transition shadow-2xs cursor-pointer flex items-center gap-2.5 group"
+            >
+              <div className="w-8 h-8 rounded-lg bg-emerald-100 text-[#1E9E60] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <Store className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="font-montserrat font-black text-xs text-emerald-950 flex items-center justify-between">
+                  <span>+ Shop {liquorStores.length + 1}</span>
+                  <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-emerald-200/70 text-emerald-900 font-bold">Under Branch</span>
+                </div>
+                <div className="text-[10px] text-emerald-800/80 truncate font-medium">Retail Liquor Outlet</div>
+              </div>
+            </button>
+
+            {/* 3. Main Branch (Head Office) */}
+            <button
+              type="button"
+              onClick={() => {
+                applyBranchPreset('STORE', mainStores.length + 1);
+                setIsAddBranchOpen(true);
+                setIsHeroMenuOpen(false);
+              }}
+              className="p-2.5 sm:p-3 rounded-xl bg-white hover:bg-blue-50 active:bg-blue-100/70 text-blue-950 border border-blue-300/80 hover:border-blue-400 text-left transition shadow-2xs cursor-pointer flex items-center gap-2.5 group"
+            >
+              <div className="w-8 h-8 rounded-lg bg-blue-100 text-[#0A006E] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <Building2 className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="font-montserrat font-black text-xs text-blue-950 flex items-center justify-between">
+                  <span>+ Main Branch</span>
+                  <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-blue-200/70 text-blue-900 font-bold">Head Office</span>
+                </div>
+                <div className="text-[10px] text-blue-800/80 truncate font-medium">Central HQ Entity</div>
+              </div>
+            </button>
+
+            {/* 4. Restaurant 1 (Independent) */}
+            <button
+              type="button"
+              onClick={() => {
+                applyBranchPreset('RESTAURANT', restaurants.length + 1);
+                setIsAddBranchOpen(true);
+                setIsHeroMenuOpen(false);
+              }}
+              className="p-2.5 sm:p-3 rounded-xl bg-white hover:bg-orange-50 active:bg-orange-100/70 text-orange-950 border border-orange-300/80 hover:border-orange-400 text-left transition shadow-2xs cursor-pointer flex items-center gap-2.5 group"
+            >
+              <div className="w-8 h-8 rounded-lg bg-orange-100 text-orange-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <Utensils className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="font-montserrat font-black text-xs text-orange-950 flex items-center justify-between">
+                  <span>+ Restaurant {restaurants.length + 1}</span>
+                  <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-orange-200/70 text-orange-900 font-bold">Independent</span>
+                </div>
+                <div className="text-[10px] text-orange-800/80 truncate font-medium">Food Menu &amp; Grill Bar</div>
+              </div>
             </button>
           </div>
         </div>
@@ -1122,6 +1230,69 @@ export const BranchHierarchy: React.FC = () => {
           )}
         </div>
 
+        {/* SECTION 5: INDEPENDENT RESTAURANTS (FOOD MENUS, CATEGORIES & ALCOHOL BILL INTEGRATION) */}
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="font-montserrat font-black text-sm text-orange-950 uppercase tracking-wide flex items-center gap-1.5">
+                <Utensils className="w-4 h-4 text-orange-600" />
+                <span>Independent Restaurants (Food Menus, Categories, Custom Pricing &amp; Thermal Receipts)</span>
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                Operates independently with separate kitchen menus, food categories, and dishes. Cashiers can also consolidate client alcohol bills onto the restaurant thermal receipt.
+              </p>
+            </div>
+            <span className="text-xs text-slate-500">{restaurants.length} Restaurant(s)</span>
+          </div>
+
+          {restaurants.length === 0 ? (
+            <div className="p-5 rounded-2xl bg-orange-50/60 border border-dashed border-orange-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-orange-950">
+              <div>
+                <div className="font-montserrat font-black text-sm">No Independent Restaurant Branches Created Yet</div>
+                <p className="text-orange-800 mt-0.5">
+                  Restaurants operate independently with custom food items, categories, pricing, and support consolidating client alcohol bills onto thermal receipts.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  applyBranchPreset('RESTAURANT', 1);
+                  setIsAddBranchOpen(true);
+                }}
+                className="px-4 py-2 rounded-xl bg-orange-600 text-white font-montserrat font-bold text-xs shrink-0 hover:bg-orange-700 transition cursor-pointer shadow-xs"
+              >
+                + Create Restaurant 1 (Independent)
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {restaurants.map(branch => (
+                <BranchCard
+                  key={branch.id}
+                  branch={branch}
+                  allBranches={branches}
+                  childShops={[]}
+                  isActive={branch.id === activeBranchId}
+                  onSelect={() => switchBranch(branch.id)}
+                  onSelectBranchId={switchBranch}
+                  stockValue={getBranchStockValue(branch.id)}
+                  canEdit={canEditRules}
+                  onEditThreshold={() => {
+                    setEditingThresholdBranch(branch);
+                    setNewThresholdValue(branch.minWholesaleThresholdKes || 50000);
+                  }}
+                  onOpenBranchPricing={() => {
+                    setPricingModalBranchId(branch.id);
+                    setPricingModalTab('BRANCH_OVERRIDES');
+                  }}
+                  onManageFoodMenu={() => setSelectedRestaurantForFood(branch)}
+                  onChangeParentBranch={updateBranchParent}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
       </div>
 
       {/* Threshold Editor Modal */}
@@ -1187,12 +1358,14 @@ export const BranchHierarchy: React.FC = () => {
                 ? 'Create Shop Under a Branch'
                 : tier === 'DISTRIBUTOR'
                 ? 'Create Branch (Merchant) Under Main Branch (Head Office)'
+                : tier === 'RESTAURANT'
+                ? 'Create Restaurant Branch (Independent Food, Categories & Pricing)'
                 : tier === 'MAIN_STORE'
                 ? 'Create Main Branch (Head Office)'
                 : 'Create Head Office Bonded Warehouse'}
             </h3>
             <p className="text-xs text-slate-500 mb-4">
-              <strong>Main Branch is the Head Office.</strong> Branches are the <strong>Merchants</strong>, and <strong>Shops are only created under a Branch</strong>.
+              <strong>Main Branch is the Head Office.</strong> Branches are the <strong>Merchants</strong>, <strong>Shops are created under a Branch</strong>, and <strong>Restaurants operate independently with custom food menus</strong>.
             </p>
 
             {/* Quick Branch Preset Selector */}
@@ -1219,57 +1392,70 @@ export const BranchHierarchy: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                 <button
                   type="button"
                   onClick={() => applyBranchPreset('DISTRIBUTOR', branchNumber)}
-                  className={`p-2.5 rounded-xl border text-left text-xs font-montserrat font-bold transition ${
+                  className={`p-2 rounded-xl border text-left text-xs font-montserrat font-bold transition ${
                     presetCategory === 'DISTRIBUTOR'
                       ? 'bg-[#0A006E] text-white border-[#0A006E]'
                       : 'bg-white text-slate-800 border-slate-200 hover:bg-slate-100'
                   }`}
                 >
-                  <div>Branch {branchNumber} (Merchant)</div>
-                  <div className="text-[10px] font-mono opacity-75">BR-MRC-{String(branchNumber).padStart(2, '0')}</div>
+                  <div className="truncate">Branch {branchNumber}</div>
+                  <div className="text-[9px] font-mono opacity-75">BR-MRC-{String(branchNumber).padStart(2, '0')}</div>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => applyBranchPreset('LIQUOR_SHOP', branchNumber)}
-                  className={`p-2.5 rounded-xl border text-left text-xs font-montserrat font-bold transition ${
+                  className={`p-2 rounded-xl border text-left text-xs font-montserrat font-bold transition ${
                     presetCategory === 'LIQUOR_SHOP'
                       ? 'bg-[#34D186] text-white border-[#34D186]'
                       : 'bg-white text-slate-800 border-slate-200 hover:bg-slate-100'
                   }`}
                 >
-                  <div>Shop {branchNumber} (Under Branch)</div>
-                  <div className="text-[10px] font-mono opacity-75">SHP-{String(branchNumber).padStart(2, '0')}</div>
+                  <div className="truncate">Shop {branchNumber}</div>
+                  <div className="text-[9px] font-mono opacity-75">SHP-{String(branchNumber).padStart(2, '0')}</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => applyBranchPreset('RESTAURANT', branchNumber)}
+                  className={`p-2 rounded-xl border text-left text-xs font-montserrat font-bold transition ${
+                    presetCategory === 'RESTAURANT'
+                      ? 'bg-orange-600 text-white border-orange-600'
+                      : 'bg-white text-slate-800 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <div className="truncate text-orange-950 font-black">Restaurant {branchNumber}</div>
+                  <div className="text-[9px] font-mono opacity-75">REST-{String(branchNumber).padStart(2, '0')}</div>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => applyBranchPreset('STORE', branchNumber)}
-                  className={`p-2.5 rounded-xl border text-left text-xs font-montserrat font-bold transition ${
+                  className={`p-2 rounded-xl border text-left text-xs font-montserrat font-bold transition ${
                     presetCategory === 'STORE'
                       ? 'bg-[#0A006E] text-white border-[#0A006E]'
                       : 'bg-white text-slate-800 border-slate-200 hover:bg-slate-100'
                   }`}
                 >
-                  <div>Main Branch (HQ)</div>
-                  <div className="text-[10px] font-mono opacity-75">MB-HQ-{String(branchNumber).padStart(2, '0')}</div>
+                  <div className="truncate">Main Branch (HQ)</div>
+                  <div className="text-[9px] font-mono opacity-75">MB-HQ-{String(branchNumber).padStart(2, '0')}</div>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => applyBranchPreset('WAREHOUSE', branchNumber)}
-                  className={`p-2.5 rounded-xl border text-left text-xs font-montserrat font-bold transition ${
+                  className={`p-2 rounded-xl border text-left text-xs font-montserrat font-bold transition ${
                     presetCategory === 'WAREHOUSE'
                       ? 'bg-purple-950 text-white border-purple-950'
                       : 'bg-white text-slate-800 border-slate-200 hover:bg-slate-100'
                   }`}
                 >
-                  <div>HQ Warehouse {branchNumber}</div>
-                  <div className="text-[10px] font-mono opacity-75">WH-HQ-{String(branchNumber).padStart(2, '0')}</div>
+                  <div className="truncate">Warehouse {branchNumber}</div>
+                  <div className="text-[9px] font-mono opacity-75">WH-HQ-{String(branchNumber).padStart(2, '0')}</div>
                 </button>
               </div>
             </div>
@@ -1291,10 +1477,61 @@ export const BranchHierarchy: React.FC = () => {
                 >
                   <option value="DISTRIBUTOR">Branch (Merchant — Operating Under Main Branch Head Office)</option>
                   <option value="LIQUOR_STORE">Shop (Retail Liquor Outlet — Created Strictly Under a Branch)</option>
+                  <option value="RESTAURANT">Restaurant Branch (Independent Food Menus, Categories &amp; Pricing)</option>
                   <option value="MAIN_STORE">Main Branch (Head Office — Central Wholesale &amp; HQ)</option>
                   <option value="WAREHOUSE">Head Office Bonded Warehouse (Fulfillment Only, No Direct Sales)</option>
                 </select>
               </div>
+
+              {/* Independent Restaurant Configuration */}
+              {tier === 'RESTAURANT' && (
+                <div className="p-3.5 rounded-xl bg-orange-50/90 border-2 border-orange-400 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="block text-xs font-montserrat font-black text-orange-950 flex items-center gap-1.5">
+                      <Utensils className="w-4 h-4 text-orange-600" />
+                      <span>Independent Restaurant Branch Settings</span>
+                    </label>
+                    <span className="px-2 py-0.5 rounded bg-orange-600 text-white font-montserrat font-black text-[10px] uppercase">
+                      Independent Branch
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-orange-900 leading-relaxed">
+                    This restaurant operates independently: it creates its own custom food items, categories, and pricing in KES. When customers buy drinks, the cashier can also consolidate client alcohol bills onto their food thermal receipt.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Cuisine / Menu Style</label>
+                      <input
+                        type="text"
+                        value={restaurantCuisineType}
+                        onChange={e => setRestaurantCuisineType(e.target.value)}
+                        placeholder="e.g. Kenyan Local & Nyama Choma"
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Table Capacity</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={500}
+                        value={restaurantTableCount}
+                        onChange={e => setRestaurantTableCount(Number(e.target.value) || 1)}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold"
+                      />
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-[11px] font-bold text-slate-800 cursor-pointer pt-0.5">
+                    <input
+                      type="checkbox"
+                      checked={restaurantAllowAlcoholBilling}
+                      onChange={e => setRestaurantAllowAlcoholBilling(e.target.checked)}
+                      className="w-4 h-4 text-orange-600 rounded border-slate-300"
+                    />
+                    <span>Allow consolidating client alcohol bill onto food thermal receipt</span>
+                  </label>
+                </div>
+              )}
 
               {/* Mandatory Parent Branch Selector when creating a Shop */}
               {tier === 'LIQUOR_STORE' && (
@@ -2158,6 +2395,14 @@ export const BranchHierarchy: React.FC = () => {
         );
       })()}
 
+      {/* Independent Restaurant Food & Menu Manager Modal */}
+      {selectedRestaurantForFood && (
+        <RestaurantFoodManager
+          branchId={selectedRestaurantForFood.id}
+          onClose={() => setSelectedRestaurantForFood(null)}
+        />
+      )}
+
     </div>
   );
 };
@@ -2173,6 +2418,7 @@ interface BranchCardProps {
   canEdit: boolean;
   onEditThreshold: () => void;
   onOpenBranchPricing: () => void;
+  onManageFoodMenu?: () => void;
   onCreateShopUnderBranch?: () => void;
   onChangeParentBranch?: (branchId: string, parentBranchId: string) => void;
 }
@@ -2188,6 +2434,7 @@ const BranchCard: React.FC<BranchCardProps> = ({
   canEdit,
   onEditThreshold,
   onOpenBranchPricing,
+  onManageFoodMenu,
   onCreateShopUnderBranch,
   onChangeParentBranch
 }) => {
@@ -2227,6 +2474,12 @@ const BranchCard: React.FC<BranchCardProps> = ({
             {branch.tier === 'LIQUOR_STORE' && (
               <span className="text-[10px] font-montserrat font-black px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 uppercase">
                 Shop (Under Branch)
+              </span>
+            )}
+            {(branch.tier === 'RESTAURANT' || branch.isRestaurant) && (
+              <span className="text-[10px] font-montserrat font-black px-2 py-0.5 rounded bg-orange-100 text-orange-950 border border-orange-300 uppercase flex items-center gap-1">
+                <Utensils className="w-3 h-3 text-orange-600" />
+                <span>Restaurant • Independent Food &amp; Dining</span>
               </span>
             )}
             {isActive && (
@@ -2290,6 +2543,23 @@ const BranchCard: React.FC<BranchCardProps> = ({
           <span className="font-mono font-bold text-[10px] text-amber-800">
             {childShops.length} Shop(s) Under Branch
           </span>
+        </div>
+      )}
+
+      {(branch.tier === 'RESTAURANT' || branch.isRestaurant) && (
+        <div className="mb-2.5 p-2.5 rounded-xl bg-orange-50/90 border border-orange-200 text-xs text-orange-950 space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold">
+              Cuisine: <strong>{branch.cuisineType || 'Kenyan Local & Nyama Choma'}</strong>
+            </span>
+            <span className="font-mono font-bold text-orange-800 bg-orange-100 px-2 py-0.5 rounded">
+              {branch.tableCount || 25} Dine-in Tables
+            </span>
+          </div>
+          <div className="text-[11px] text-emerald-800 font-semibold flex items-center gap-1">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Client Alcohol Bill to Food Receipt: Active</span>
+          </div>
         </div>
       )}
 
@@ -2441,6 +2711,18 @@ const BranchCard: React.FC<BranchCardProps> = ({
           >
             <Tag className="w-3 h-3" />
             <span>Branch Prices</span>
+          </button>
+        )}
+
+        {(branch.tier === 'RESTAURANT' || branch.isRestaurant) && (
+          <button
+            type="button"
+            onClick={onManageFoodMenu}
+            className="px-3 py-1.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-montserrat font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+            title="Create and manage food dishes, categories, and custom pricing for this independent restaurant"
+          >
+            <Utensils className="w-3.5 h-3.5" />
+            <span>Food Menu &amp; Categories</span>
           </button>
         )}
       </div>

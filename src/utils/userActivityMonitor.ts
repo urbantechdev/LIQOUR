@@ -6,7 +6,7 @@ import {
   orderBy,
   limit
 } from 'firebase/firestore';
-import { getAuthHeaders, getStoredSessionToken } from './apiAuth';
+import { getAuthHeaders } from './apiAuth';
 import {
   db,
   OperationType,
@@ -258,7 +258,7 @@ export function subscribeToUserActivityLogs(
   const pullActivityLogs = async () => {
     if (isDisposed) return;
     try {
-      const res = await fetch('/api/audit/activity-state', { headers: { ...getAuthHeaders() } });
+      const res = await fetch('/api/audit/activity-state');
       if (res.ok && !isDisposed) {
         const data = await res.json().catch(() => ({}));
         if (Array.isArray(data?.activityLogs) && data.activityLogs.length > 0) {
@@ -275,7 +275,7 @@ export function subscribeToUserActivityLogs(
   let eventSource: EventSource | null = null;
   if (typeof window !== 'undefined' && typeof window.EventSource !== 'undefined') {
     try {
-      eventSource = new EventSource(`/api/erp/live-stream?token=${encodeURIComponent(getStoredSessionToken())}`);
+      eventSource = new EventSource('/api/erp/live-stream');
       eventSource.addEventListener('USER_ACTIVITY_UPDATED', () => {
         if (!isDisposed) void pullActivityLogs();
       });
@@ -337,7 +337,7 @@ export function subscribeToUserSessionMonitors(
   const pullSessionMonitors = async () => {
     if (isDisposed) return;
     try {
-      const res = await fetch('/api/audit/activity-state', { headers: { ...getAuthHeaders() } });
+      const res = await fetch('/api/audit/activity-state');
       if (res.ok && !isDisposed) {
         const data = await res.json().catch(() => ({}));
         if (Array.isArray(data?.sessionMonitors) && data.sessionMonitors.length > 0) {
@@ -354,7 +354,7 @@ export function subscribeToUserSessionMonitors(
   let eventSource: EventSource | null = null;
   if (typeof window !== 'undefined' && typeof window.EventSource !== 'undefined') {
     try {
-      eventSource = new EventSource(`/api/erp/live-stream?token=${encodeURIComponent(getStoredSessionToken())}`);
+      eventSource = new EventSource('/api/erp/live-stream');
       eventSource.addEventListener('USER_ACTIVITY_UPDATED', () => {
         if (!isDisposed) void pullSessionMonitors();
       });

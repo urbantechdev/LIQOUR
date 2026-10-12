@@ -21,7 +21,7 @@ import {
   splitProductIntoPublicAndPrivate,
   stripCommercialPricingFromPublicProduct
 } from './productCatalogSplit';
-import { getAuthHeaders, getStoredSessionToken } from './apiAuth';
+import { getAuthHeaders } from './apiAuth';
 
 export const UNIFIED_ERP_COLLECTION = 'erpUnifiedState';
 export const PUBLIC_PRODUCTS_COLLECTION = 'productsPublic';
@@ -242,8 +242,7 @@ export async function pushUnifiedErpStateToFirestore<T>(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-vaairo-terminal-sync': '1',
-        ...getAuthHeaders()
+        'x-vaairo-terminal-sync': '1'
       },
       body: JSON.stringify({
         docs: [docPayload]
@@ -265,118 +264,6 @@ export async function pushUnifiedErpStateToFirestore<T>(
     } catch {
       // Ignore if offline or non-admin; LocalStorage & IndexedDB retain full copy
     }
-    return false;
-  }
-}
-
-/**
- * Synchronizes a user profile record directly to Firebase Firestore users/{userId}
- * via the server authoritative pipeline.
- */
-export async function syncUserToFirebase(user: {
-  id?: string;
-  name?: string;
-  email?: string;
-  role?: string;
-  department?: string;
-  branchId?: string;
-  organizationId?: string;
-  phone?: string;
-  mfaEnabled?: boolean;
-}): Promise<boolean> {
-  try {
-    const res = await fetch('/api/users/sync', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...getAuthHeaders()
-      },
-      body: JSON.stringify(user)
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Synchronizes an individual product record directly to Firebase Firestore
- * (/products/{id}, /productsPublic/{id}, /productsPrivate/{id}, and /scanHistory)
- * when created, edited, or scanned via barcode intake or POS counter.
- */
-export async function syncProductRecordToFirebase(
-  product: Product,
-  isScan = false,
-  scanMetadata?: {
-    branchId?: string;
-    scanType?: string;
-    scannerUserId?: string;
-    scannerName?: string;
-    barcode?: string;
-  }
-): Promise<boolean> {
-  try {
-    const res = await fetch('/api/products/sync-record', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...getAuthHeaders()
-      },
-      body: JSON.stringify({
-        product,
-        isScan,
-        scanMetadata
-      })
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Synchronizes a batch of products to Firebase Firestore.
- */
-export async function syncProductsBatchToFirebase(products: Product[]): Promise<boolean> {
-  try {
-    const res = await fetch('/api/products/sync-batch', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...getAuthHeaders()
-      },
-      body: JSON.stringify({ products })
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Synchronizes any operational business document (Orders, Invoices, Delivery Orders,
- * Stock Transfers, Quotes, Audit Sessions) to its respective Firebase Firestore collection.
- */
-export async function syncDocumentToFirebase(
-  documentType: 'ORDER' | 'ETIMS' | 'COMMERCIAL_INVOICE' | 'SUPPLY_INVOICE' | 'QUOTE' | 'STOCK_TRANSFER' | 'PURCHASE_ORDER' | 'STOCK_AUDIT',
-  documentId: string,
-  payload: Record<string, unknown>
-): Promise<boolean> {
-  try {
-    const res = await fetch('/api/documents/sync', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...getAuthHeaders()
-      },
-      body: JSON.stringify({
-        documentType,
-        documentId,
-        payload
-      })
-    });
-    return res.ok;
-  } catch {
     return false;
   }
 }
@@ -475,7 +362,7 @@ export function subscribeToUnifiedErpDatabase(
   const pullUnifiedStateFromServer = async () => {
     if (isDisposed) return;
     try {
-      const res = await fetch('/api/erp/unified-state', { headers: { ...getAuthHeaders() } });
+      const res = await fetch('/api/erp/unified-state');
       if (!res.ok || isDisposed) return;
       const data = await res.json().catch(() => ({}));
       const docs = Array.isArray(data?.docs) ? (data.docs as Array<Record<string, unknown>>) : [];
@@ -528,7 +415,7 @@ export function subscribeToUnifiedErpDatabase(
   let eventSource: EventSource | null = null;
   if (typeof window !== 'undefined' && typeof window.EventSource !== 'undefined') {
     try {
-      eventSource = new EventSource(`/api/erp/live-stream?token=${encodeURIComponent(getStoredSessionToken())}`);
+      eventSource = new EventSource('/api/erp/live-stream');
       eventSource.addEventListener('INITIAL_SNAPSHOT', (evt: MessageEvent) => {
         if (isDisposed) return;
         try {

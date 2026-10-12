@@ -12,7 +12,7 @@ import {
   CornerDownLeft
 } from 'lucide-react';
 
-const INACTIVITY_LIMIT_MS = 2 * 60 * 1000; // 2 minutes (120,000ms) of inactivity
+const INACTIVITY_LIMIT_MS = 5 * 60 * 1000; // 5 minutes (300,000ms) of inactivity per enterprise specification
 const COUNTDOWN_SECONDS = 30; // 30-second countdown to 0
 
 let manualFullscreenExit = false;

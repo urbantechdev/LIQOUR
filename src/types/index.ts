@@ -18,8 +18,9 @@ export type BranchTier =
   | 'WAREHOUSE' 
   | 'MAIN_STORE' 
   | 'DISTRIBUTOR' 
-  | 'SUPERMARKET'
-  | 'LIQUOR_STORE';
+  | 'SUPERMARKET' 
+  | 'LIQUOR_STORE'
+  | 'RESTAURANT';
 
 export type StockCategory = 'IPS' | 'LPS'; // Imported Products Stock vs Local Products Stock
 

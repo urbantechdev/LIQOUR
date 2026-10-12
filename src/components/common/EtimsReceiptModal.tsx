@@ -85,6 +85,12 @@ export const EtimsReceiptModal: React.FC<Props> = ({ invoice, order, onClose }) 
               <span>BUYER NAME:</span>
               <span className="truncate max-w-[180px]">{invoice.buyerName}</span>
             </div>
+            {resolvedOrder?.tableNumber && (
+              <div className="flex justify-between bg-amber-50 px-1 py-0.5 rounded border border-amber-200">
+                <span className="font-bold text-[#0A006E]">DINE-IN TABLE:</span>
+                <span className="font-montserrat font-black text-slate-900">{resolvedOrder.tableNumber}</span>
+              </div>
+            )}
             <div className="flex justify-between pt-1 border-t border-dotted border-slate-300 text-slate-900">
               <span className="font-bold">SERVED BY -</span>
               <span className="font-montserrat font-black text-[#0A006E]">{servedByName}</span>
@@ -97,12 +103,14 @@ export const EtimsReceiptModal: React.FC<Props> = ({ invoice, order, onClose }) 
             )}
           </div>
 
-          {/* Itemized Table */}
+          {/* Itemized Table (Restaurant Food or Drinks) */}
           <div className="border-b border-dashed border-slate-300 pb-3">
             <table className="w-full text-left">
               <thead>
                 <tr className="border-b border-slate-200 text-slate-500">
-                  <th className="pb-1 font-semibold">ITEM DESCRIPTION</th>
+                  <th className="pb-1 font-semibold">
+                    {resolvedOrder?.attachedAlcoholBill ? 'FOOD / KITCHEN ITEMS' : 'ITEM DESCRIPTION'}
+                  </th>
                   <th className="pb-1 text-center font-semibold">QTY</th>
                   <th className="pb-1 text-right font-semibold">TOTAL (KES)</th>
                 </tr>
@@ -126,8 +134,76 @@ export const EtimsReceiptModal: React.FC<Props> = ({ invoice, order, onClose }) 
             </table>
           </div>
 
+          {/* Attached Client Alcohol Bill (Consolidated from Bar / Drinks Counter) */}
+          {resolvedOrder?.attachedAlcoholBill && (
+            <div className="border-b border-dashed border-slate-300 pb-3 space-y-2">
+              <div className="bg-amber-100/70 p-1.5 rounded border border-amber-300 text-[10px] space-y-0.5">
+                <div className="flex items-center justify-between font-montserrat font-black text-[#0A006E]">
+                  <span>🍷 ATTACHED CLIENT ALCOHOL BILL</span>
+                  <span>REF: #{resolvedOrder.attachedAlcoholBill.billNumber}</span>
+                </div>
+                {resolvedOrder.attachedAlcoholBill.branchName && (
+                  <div className="text-slate-600">
+                    Source: {resolvedOrder.attachedAlcoholBill.branchName}
+                    {resolvedOrder.attachedAlcoholBill.cashierName ? ` • Cashier: ${resolvedOrder.attachedAlcoholBill.cashierName}` : ''}
+                  </div>
+                )}
+              </div>
+
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="border-b border-dotted border-slate-300 text-slate-500 text-[10px]">
+                    <th className="pb-0.5">DRINK / ALCOHOL ITEM</th>
+                    <th className="pb-0.5 text-center">QTY</th>
+                    <th className="pb-0.5 text-right">TOTAL (KES)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-[11px]">
+                  {resolvedOrder.attachedAlcoholBill.items.map((item, idx) => (
+                    <tr key={idx} className="text-slate-800">
+                      <td className="py-0.5">
+                        <div className="font-medium text-slate-900">{item.productName}</div>
+                        {item.sku && <div className="text-[9px] text-slate-400">SKU: {item.sku}</div>}
+                      </td>
+                      <td className="py-0.5 text-center font-bold">{item.quantity}</td>
+                      <td className="py-0.5 text-right font-bold font-mono">
+                        {item.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className="flex justify-between items-center text-[11px] pt-1 border-t border-dotted border-slate-300 font-bold text-slate-800">
+                <span>ATTACHED ALCOHOL SUBTOTAL:</span>
+                <span className="font-mono">{formatKes(resolvedOrder.attachedAlcoholBill.totalKes)}</span>
+              </div>
+            </div>
+          )}
+
           {/* Enforced 16% VAT & Financials breakdown */}
           <div className="space-y-1.5 text-slate-800 border-b border-dashed border-slate-300 pb-3">
+            {resolvedOrder?.attachedAlcoholBill && (
+              <div className="space-y-1 text-[11px] bg-slate-100/80 p-2 rounded border border-slate-200">
+                <div className="flex justify-between text-slate-700">
+                  <span>Food Order Subtotal:</span>
+                  <span className="font-mono font-bold">
+                    {formatKes(
+                      Math.max(
+                        0,
+                        (resolvedOrder.totalAmount ?? resolvedOrder.totalKes) - resolvedOrder.attachedAlcoholBill.totalKes
+                      )
+                    )}
+                  </span>
+                </div>
+                <div className="flex justify-between text-slate-700">
+                  <span>Attached Client Alcohol Bill:</span>
+                  <span className="font-mono font-bold text-[#0A006E]">
+                    +{formatKes(resolvedOrder.attachedAlcoholBill.totalKes)}
+                  </span>
+                </div>
+              </div>
+            )}
             <div className="flex justify-between text-slate-600">
               <span>TAXABLE AMOUNT (EXCL. 16% VAT):</span>
               <span>{formatKes(invoice.taxableAmount)}</span>

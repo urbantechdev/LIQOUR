@@ -15,6 +15,7 @@ import {
 } from '../firebase';
 import { Product, User } from '../types';
 import { getAuthHeaders } from './apiAuth';
+import { stripCommercialPricingFromPublicProduct } from './productCatalogSplit';
 
 export interface UserSyncPayload {
   id?: string;
@@ -70,8 +71,8 @@ const lastSyncSignatures = new Map<string, string>();
 export async function syncUserToFirebase(user: Partial<User> & { id: string }): Promise<boolean> {
   const safeId = String(user.id || user.email || 'user-unknown').replace(/[^a-zA-Z0-9_@.-]/g, '_').slice(0, 120);
   if (!safeId) return false;
-  const nowIso = new Date().toISOString();
 
+  const nowIso = new Date().toISOString();
   const payload: UserSyncPayload = {
     userId: safeId,
     id: safeId,
@@ -138,8 +139,8 @@ export async function syncUserToFirebase(user: Partial<User> & { id: string }): 
 export async function syncProductCreatedToFirebase(product: Product): Promise<boolean> {
   const safeId = String(product.id || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
   if (!safeId) return false;
-  const nowIso = new Date().toISOString();
 
+  const nowIso = new Date().toISOString();
   const normalizedProduct = {
     ...product,
     id: safeId,
@@ -190,8 +191,8 @@ export async function syncProductScannedToFirebase(
 ): Promise<boolean> {
   const safeId = String(product.id || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
   if (!safeId) return false;
-  const nowIso = new Date().toISOString();
 
+  const nowIso = new Date().toISOString();
   const enrichedMetadata: ProductScanMetadata = {
     ...scanMetadata,
     barcode: scanMetadata.barcode || product.barcode || product.sku,
@@ -234,8 +235,8 @@ export async function syncDocumentToFirebase(
 ): Promise<boolean> {
   const safeId = String(documentId || payload.id || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
   if (!safeId) return false;
-  const nowIso = new Date().toISOString();
 
+  const nowIso = new Date().toISOString();
   const normalizedPayload = {
     ...payload,
     id: safeId,

@@ -3,6 +3,7 @@ import { useErp } from '../../context/ErpContext';
 import { getAuthHeaders } from '../../utils/apiAuth';
 import { Product, StockCategory, HeldCart } from '../../types';
 import { formatKes } from '../../utils/kenyaTax';
+import { syncProductScannedToFirebase } from '../../utils/firebaseSyncEngine';
 import { 
   Search, 
   Barcode, 
@@ -67,20 +68,6 @@ import {
 } from '../../utils/kenyanMobileCarrier';
 import { CashierRegisterView } from './CashierRegisterView';
 import { CatalogLookupDrawer } from './CatalogLookupDrawer';
-import { syncProductRecordToFirebase } from '../../utils/unifiedErpDatabase';
-import { syncProductScannedToFirebase } from '../../utils/firebaseSyncEngine';
-
-const QUICK_POS_SCAN_SAMPLES = [
-  { label: 'Johnnie Walker Black 750ml', code: '0500029912303', price: '4,500' },
-  { label: 'Johnnie Walker Red 750ml', code: '5000267014005', price: '2,600' },
-  { label: 'Tusker Lager 6-Pk', code: '6161101601016', price: '1,500' },
-  { label: 'Smirnoff Vodka 750ml', code: '6161101600316', price: '1,599' },
-  { label: 'Hennessy VS 700ml', code: '3245990250203', price: '5,999' },
-  { label: 'Jameson Irish 750ml', code: '5011007003234', price: '3,500' },
-  { label: 'White Cap Lager 500ml', code: '6161101602013', price: '280' },
-  { label: 'Gilbeys Gin 750ml', code: '6161101600101', price: '1,450' },
-  { label: 'Jack Daniel\'s 700ml', code: '5099873042212', price: '3,800' },
-];
 
 interface ShiftDrawerState {
   isOpen: boolean;
@@ -137,7 +124,14 @@ export const PosTerminal: React.FC = () => {
     createRestockRequest,
     acceptAndFulfillRestockRequest,
     etimsInvoices,
-    scanHistory
+    scanHistory,
+    attachedAlcoholBill,
+    setAttachedAlcoholBill,
+    restaurantTableNumber,
+    setRestaurantTableNumber,
+    restaurantFoodCategories,
+    restaurantFoodItems,
+    addFoodToCart
   } = useErp();
 
   // Two POS Sales Roles:
@@ -613,16 +607,18 @@ export const PosTerminal: React.FC = () => {
   const totalAffiliateMarkup = cart.reduce((sum, item) => sum + item.affiliateMarkupPerUnit * item.quantity, 0);
   const companyBaselineSubtotal = Math.max(0, subtotal - totalAffiliateMarkup);
   const vatAmount = Math.round((companyBaselineSubtotal - (companyBaselineSubtotal / 1.16)) * 100) / 100;
+  const attachedAlcoholAmount = attachedAlcoholBill ? attachedAlcoholBill.totalKes : 0;
+  const effectiveGrandTotal = subtotal + attachedAlcoholAmount;
 
   // Cash change calculation
   const parsedCashTendered = parseFloat(cashTendered) || 0;
-  const cashChange = parsedCashTendered > subtotal ? parsedCashTendered - subtotal : 0;
+  const cashChange = parsedCashTendered > effectiveGrandTotal ? parsedCashTendered - effectiveGrandTotal : 0;
 
   // Split calculations
   const parsedSplitCash = parseFloat(splitCashAmount) || 0;
   const parsedSplitMpesa = parseFloat(splitMpesaAmount) || 0;
   const splitTotalPaid = parsedSplitCash + parsedSplitMpesa;
-  const splitRemaining = subtotal > splitTotalPaid ? subtotal - splitTotalPaid : 0;
+  const splitRemaining = effectiveGrandTotal > splitTotalPaid ? effectiveGrandTotal - splitTotalPaid : 0;
 
   // Audio beep feedback simulator
   const playBeep = (freq = 880, duration = 80) => {
@@ -746,6 +742,18 @@ export const PosTerminal: React.FC = () => {
       addToCart(matchedProd, qtyToAdd, 0);
       playBeep(1200, 70);
 
+      // Real-time synchronization to Firebase (updates scan history and product scan stats)
+      void syncProductScannedToFirebase(matchedProd, {
+        branchId: activeBranch.id,
+        branchName: activeBranch.name,
+        scanType: isCaseScan ? 'CASE_BOX' : 'SINGLE_BOTTLE',
+        barcode: code,
+        sku: matchedProd.sku,
+        scannerUserId: currentUser.id,
+        scannerName: currentUser.name,
+        mode: 'POS_CHECKOUT'
+      });
+
       const remainingAfterCart = stock > 0 ? Math.max(0, stock - (existingInCart + qtyToAdd)) : 0;
       showSuccessFeedback(
         'Scanned & Added!',
@@ -760,25 +768,6 @@ export const PosTerminal: React.FC = () => {
         qtyAdded: qtyToAdd,
         stockOnHand: stock,
         remainingAfterCart
-      });
-
-      // Synchronize scanned product & barcode audit record to Firebase in real-time
-      void syncProductScannedToFirebase(matchedProd, {
-        branchId: activeBranch.id,
-        branchName: activeBranch.name,
-        scanType: isCaseScan ? 'CASE_BOX' : 'SINGLE_BOTTLE',
-        barcode: code,
-        sku: matchedProd.sku,
-        scannerUserId: currentUser.id,
-        scannerName: currentUser.name,
-        mode: 'POS_CHECKOUT'
-      });
-      void syncProductRecordToFirebase(matchedProd, true, {
-        branchId: activeBranch.id,
-        barcode: code,
-        scanType: isCaseScan ? 'MASTER_CASE' : 'SINGLE_BOTTLE',
-        scannerUserId: currentUser.id,
-        scannerName: currentUser.name
       });
 
       setJustScannedProductId(matchedProd.id);
@@ -1674,8 +1663,8 @@ export const PosTerminal: React.FC = () => {
         </div>
       )}
 
-      {/* CASHIER WORKSTATION ROUTING: Clean Retail POS Register vs Catalog Grid */}
-      {posStationMode === 'COUNTER_CASHIER' && cashierViewMode === 'REGISTER' ? (
+      {/* CASHIER WORKSTATION ROUTING: Clean Retail POS Register vs Sales Rep Catalog */}
+      {posStationMode === 'COUNTER_CASHIER' ? (
         <CashierRegisterView
           cart={cart}
           addToCart={addToCart}
@@ -1687,7 +1676,6 @@ export const PosTerminal: React.FC = () => {
           handleBarcodeSubmit={handleBarcodeSubmit}
           posBarcodeInputRef={posBarcodeInputRef}
           processScannedBarcode={processScannedBarcode}
-          quickScanSamples={QUICK_POS_SCAN_SAMPLES}
           lastPinnedPosScan={lastPinnedPosScan}
           setLastPinnedPosScan={setLastPinnedPosScan}
           justScannedProductId={justScannedProductId}
@@ -1745,146 +1733,152 @@ export const PosTerminal: React.FC = () => {
           products={products}
           inventoryItems={inventoryItems}
           onOpenCatalogLookup={() => setIsCatalogDrawerOpen(true)}
-          onSwitchToCatalogView={() => setCashierViewMode('CATALOG')}
         />
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5">
         
         {/* Left Column: Role Station Bar, Live Counter Order Queue, Product Catalog & Barcode Lookup (7 Cols) */}
         <div className={`lg:col-span-7 space-y-3.5 sm:space-y-4 ${mobilePosTab === 'CHECKOUT' ? 'hidden lg:block' : 'block'}`}>
-          {/* Two-Role POS Station Switcher & Counter Order Queue Status Banner */}
-          <div className={`bg-white rounded-2xl border-2 border-[#0A006E]/15 p-3.5 sm:p-4 shadow-xs space-y-3.5 ${mobilePosTab === 'CATALOG' ? 'hidden sm:block' : 'block'}`}>
-            {/* Top Row: Mode Badge + Cashier Title/Subtitle on Left, Station Switcher on Right */}
-            <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
-              <div className="space-y-1 min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center text-[10px] font-montserrat font-black uppercase tracking-wider px-2.5 py-1 rounded-lg bg-[#0A006E] text-[#FFDE00] shrink-0">
-                    {posStationMode === 'SALES_LADY' ? 'Sales Representative Mode' : 'Counter Cashier Mode'}
+          {/* POS Station Switcher & Status Banner (Space-Optimized) */}
+          <div className={`bg-white rounded-xl border border-[#0A006E]/15 p-2 sm:p-2.5 shadow-2xs ${mobilePosTab === 'CATALOG' ? 'hidden sm:block' : 'block'}`}>
+            {posStationMode === 'SALES_LADY' ? (
+              /* SLEEK, SPACE-EFFICIENT SALES REPRESENTATIVE MODE BAR */
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 min-h-[36px]">
+                {/* Left: Mode Chip + Inline Working Under Cashier */}
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                  <span className="inline-flex items-center text-[10px] font-montserrat font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-[#0A006E] text-[#FFDE00] shrink-0">
+                    Sales Rep Mode
                   </span>
-                  <span className="text-xs sm:text-sm font-montserrat font-black text-slate-900 truncate">
-                    {posStationMode === 'SALES_LADY'
-                      ? `Working under POS Cashier: ${
-                          workingUnderCashier?.name ||
+                  
+                  <div className="flex items-center gap-1.5 text-xs text-slate-700 min-w-0">
+                    <span className="text-[11px] text-slate-500 font-medium">Assigned Cashier:</span>
+                    {availablePosCashiers.length > 0 ? (
+                      <select
+                        value={
+                          workingUnderCashier?.id ||
+                          activeSalesLadyAffiliate?.assignedCashierId ||
+                          ''
+                        }
+                        onChange={(e) => {
+                          const chosen = allPosCashiers.find(c => c.id === e.target.value);
+                          setSelectedWorkingCashierId(e.target.value);
+                          if (chosen && activeSalesLadyAffiliate) {
+                            updateAffiliateAssignedCashier(
+                              activeSalesLadyAffiliate.id,
+                              chosen.id,
+                              chosen.name
+                            );
+                          }
+                        }}
+                        className="px-2 py-0.5 bg-slate-50 hover:bg-slate-100 border border-slate-300 rounded-md text-xs font-montserrat font-bold text-[#0A006E] focus:outline-none focus:ring-1 focus:ring-[#0A006E] cursor-pointer"
+                        title="Assigned POS Cashier collection queue"
+                      >
+                        {availablePosCashiers.map(cashier => (
+                          <option key={cashier.id} value={cashier.id}>
+                            {cashier.name} ({cashier.employeeNumber})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <strong className="text-[#0A006E] font-bold truncate">
+                        {workingUnderCashier?.name ||
                           activeSalesLadyAffiliate?.assignedCashierName ||
-                          'Counter Cashier'
-                        }`
-                      : `POS Cashier Counter: ${activeCounterCashierName}`}
-                  </span>
+                          'Counter Cashier'}
+                      </strong>
+                    )}
+                  </div>
                 </div>
-                <p className="text-[11px] font-montserrat font-semibold text-slate-500 leading-snug">
-                  {posStationMode === 'SALES_LADY'
-                    ? 'Pick customer drinks at preferred price and send orders to your assigned POS Cashier queue'
-                    : 'Sell Directly at Counter or Receive Orders from Sales Reps'}
-                </p>
-              </div>
 
-              <div className="flex flex-wrap items-center justify-between sm:justify-start xl:justify-end gap-2 shrink-0">
-                {activeSalesLadyAffiliate && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRepHistoryPeriod('ALL');
-                      setRepHistorySearch('');
-                      setIsRepHistoryModalOpen(true);
-                    }}
-                    className="px-3 py-1.5 rounded-xl bg-[#FFDE00] hover:bg-yellow-300 text-[#0A006E] border border-[#0A006E]/30 text-[11px] font-montserrat font-black transition flex items-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap"
-                  >
-                    <History className="w-3.5 h-3.5 shrink-0" />
-                    <span>Previous Sales Records ({activeRepPreviousOrders.length})</span>
-                  </button>
-                )}
-
-                {/* Station Mode Switcher Pills (Hidden when a Sales Representative is strictly logged in as AFFILIATES staff) */}
-                {!(currentRole === 'STAFF' && currentDepartment === 'AFFILIATES') && (
-                  <div className="grid grid-cols-2 sm:inline-flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 w-full sm:w-auto shrink-0">
+                {/* Right: Sales Records + Station Switcher */}
+                <div className="flex items-center gap-1.5 shrink-0 justify-between sm:justify-end">
+                  {activeSalesLadyAffiliate && (
                     <button
                       type="button"
-                      onClick={() => setPosStationMode('COUNTER_CASHIER')}
-                      className={`px-3 py-1.5 rounded-lg text-[11px] font-montserrat font-black transition flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                        posStationMode === 'COUNTER_CASHIER'
-                          ? 'bg-[#0A006E] text-[#FFDE00] shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
+                      onClick={() => {
+                        setRepHistoryPeriod('ALL');
+                        setRepHistorySearch('');
+                        setIsRepHistoryModalOpen(true);
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-[#FFDE00] hover:bg-yellow-300 text-[#0A006E] border border-[#0A006E]/30 text-[10px] font-montserrat font-black transition flex items-center gap-1 shadow-2xs cursor-pointer whitespace-nowrap"
+                      title="View previous orders and commissions"
                     >
-                      <Layers className="w-3.5 h-3.5 shrink-0" />
-                      <span>Counter Cashier ({branchHeldCarts.length})</span>
+                      <History className="w-3 h-3 shrink-0" />
+                      <span>Sales Records ({activeRepPreviousOrders.length})</span>
                     </button>
+                  )}
+
+                  {/* Station Mode Switcher Pills */}
+                  {!(currentRole === 'STAFF' && currentDepartment === 'AFFILIATES') && (
+                    <div className="inline-flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setPosStationMode('COUNTER_CASHIER')}
+                        className="px-2 py-0.5 rounded-md text-[10px] font-montserrat font-bold text-slate-600 hover:text-slate-900 transition flex items-center gap-1 cursor-pointer"
+                      >
+                        <Layers className="w-3 h-3" />
+                        <span>Cashier</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPosStationMode('SALES_LADY')}
+                        className="px-2 py-0.5 rounded-md text-[10px] font-montserrat font-black bg-[#34D186] text-white shadow-2xs flex items-center gap-1 cursor-pointer"
+                      >
+                        <Sparkles className="w-3 h-3" />
+                        <span>Rep</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* COUNTER CASHIER MODE TOP BAR */
+              <div className="space-y-2.5">
+                <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 flex-wrap min-w-0">
+                    <span className="inline-flex items-center text-[10px] font-montserrat font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-[#0A006E] text-[#FFDE00] shrink-0">
+                      Counter Cashier Mode
+                    </span>
+                    <span className="text-xs font-montserrat font-black text-slate-900 truncate">
+                      POS Cashier: {activeCounterCashierName}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5 shrink-0 justify-between sm:justify-end">
+                    {/* Station Mode Switcher Pills */}
+                    {!(currentRole === 'STAFF' && currentDepartment === 'AFFILIATES') && (
+                      <div className="inline-flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setPosStationMode('COUNTER_CASHIER')}
+                          className="px-2 py-0.5 rounded-md text-[10px] font-montserrat font-black bg-[#0A006E] text-[#FFDE00] shadow-xs flex items-center gap-1 cursor-pointer"
+                        >
+                          <Layers className="w-3 h-3" />
+                          <span>Cashier ({branchHeldCarts.length})</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPosStationMode('SALES_LADY')}
+                          className="px-2 py-0.5 rounded-md text-[10px] font-montserrat font-bold text-slate-600 hover:text-slate-900 flex items-center gap-1 cursor-pointer"
+                        >
+                          <Sparkles className="w-3 h-3" />
+                          <span>Rep</span>
+                        </button>
+                      </div>
+                    )}
+
                     <button
                       type="button"
-                      onClick={() => setPosStationMode('SALES_LADY')}
-                      className={`px-3 py-1.5 rounded-lg text-[11px] font-montserrat font-black transition flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                        posStationMode === 'SALES_LADY'
-                          ? 'bg-[#34D186] text-[#FFDE00] shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
+                      onClick={() => setCashierViewMode('REGISTER')}
+                      className="px-2.5 py-1 rounded-lg bg-[#0A006E] hover:bg-[#060046] text-[#FFDE00] border border-[#0A006E] text-[10px] font-montserrat font-black flex items-center gap-1 shadow-2xs cursor-pointer whitespace-nowrap"
                     >
-                      <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                      <span>Sales Representative</span>
+                      <Barcode className="w-3 h-3" />
+                      <span>Return to Register View</span>
                     </button>
                   </div>
-                )}
-
-                {posStationMode === 'COUNTER_CASHIER' && (
-                  <button
-                    type="button"
-                    onClick={() => setCashierViewMode('REGISTER')}
-                    className="px-3 py-1.5 rounded-xl bg-[#0A006E] hover:bg-[#060046] text-[#FFDE00] border border-[#0A006E] text-[11px] font-montserrat font-black flex items-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap"
-                  >
-                    <Barcode className="w-3.5 h-3.5" />
-                    <span>Return to Clean Register View</span>
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Sales Lady Assigned POS Cashier Selector Bar */}
-            {posStationMode === 'SALES_LADY' && (
-              <div className="pt-2.5 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                <div className="text-[11px] font-montserrat font-bold text-slate-700">
-                  <span className="text-[#0A006E] font-black uppercase">Working Under POS Cashier: </span>
-                  <span>
-                    Orders you submit go strictly to{' '}
-                    <strong className="text-[#1E9E60]">
-                      {workingUnderCashier?.name ||
-                        activeSalesLadyAffiliate?.assignedCashierName ||
-                        'Assigned POS Cashier'}
-                    </strong>
-                    &apos;s Collection Queue
-                  </span>
                 </div>
-                {availablePosCashiers.length > 0 && (
-                  <select
-                    value={
-                      workingUnderCashier?.id ||
-                      activeSalesLadyAffiliate?.assignedCashierId ||
-                      ''
-                    }
-                    onChange={(e) => {
-                      const chosen = allPosCashiers.find(c => c.id === e.target.value);
-                      setSelectedWorkingCashierId(e.target.value);
-                      if (chosen && activeSalesLadyAffiliate) {
-                        updateAffiliateAssignedCashier(
-                          activeSalesLadyAffiliate.id,
-                          chosen.id,
-                          chosen.name
-                        );
-                      }
-                    }}
-                    className="px-2.5 py-1.5 bg-white border border-[#0A006E]/30 rounded-lg text-xs font-montserrat font-bold text-[#0A006E] shrink-0"
-                  >
-                    {availablePosCashiers.map(cashier => (
-                      <option key={cashier.id} value={cashier.id}>
-                        POS Cashier: {cashier.name} ({cashier.employeeNumber})
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-            )}
 
-            {/* Counter Cashier Dual-Workflow Switcher: 1. Sell Directly vs 2. Receive Orders from Sales Reps */}
-            {posStationMode === 'COUNTER_CASHIER' && (
-              <div className="pt-3 border-t border-slate-100 space-y-3">
+                {/* Counter Cashier Dual-Workflow Switcher: 1. Sell Directly vs 2. Receive Orders from Sales Reps */}
+                <div className="pt-3 border-t border-slate-100 space-y-3">
                 <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-[10px] font-montserrat font-black uppercase tracking-wider text-[#0A006E] flex items-center gap-1.5 shrink-0">
@@ -2168,8 +2162,9 @@ export const PosTerminal: React.FC = () => {
                   </div>
                 )}
               </div>
-            )}
-          </div>
+            </div>
+          )}
+        </div>
           
           {/* Quick Barcode Scanner Input & App Search Bar */}
           <div className={`bg-white p-3.5 sm:p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3 ${mobilePosTab === 'QUEUE' ? 'hidden lg:block' : 'block'}`}>
@@ -2234,26 +2229,6 @@ export const PosTerminal: React.FC = () => {
                 <span>Scan / Add</span>
               </button>
             </form>
-
-            {/* Quick-Test Sample Barcode Pills (1-tap simulation of real bottle scans) */}
-            <div className="flex items-center gap-1.5 flex-wrap pt-1">
-              <span className="text-[10px] font-montserrat font-black text-slate-400 uppercase shrink-0">
-                Quick Test Scans:
-              </span>
-              {QUICK_POS_SCAN_SAMPLES.map(item => (
-                <button
-                  key={item.code}
-                  type="button"
-                  onClick={() => processScannedBarcode(item.code)}
-                  className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-[#FFDE00] text-slate-700 hover:text-[#0A006E] border border-slate-200 hover:border-[#0A006E] text-[10px] font-montserrat font-bold transition flex items-center gap-1 cursor-pointer active:scale-95 shadow-2xs"
-                  title={`Simulate barcode scan: ${item.label} (${item.code})`}
-                >
-                  <Barcode className="w-3 h-3 shrink-0" />
-                  <span>{item.label}</span>
-                  <span className="font-mono text-[9px] text-emerald-700">KES {item.price}</span>
-                </button>
-              ))}
-            </div>
 
             {barcodeFeedback && (
               <div className="text-xs font-medium px-3.5 py-2 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 animate-in fade-in flex items-center gap-2">
@@ -2641,49 +2616,6 @@ export const PosTerminal: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-1.5">
-                  {/* Kick Drawer Button — Strictly Visible ONLY to POS Counter Cashier, NOT Sales Affiliated Lady */}
-                  {isPosCashier && posStationMode === 'COUNTER_CASHIER' && (
-                    <button
-                      type="button"
-                      onClick={handleKickDrawer}
-                      className="px-2.5 py-1.5 rounded-lg bg-[#FFDE00] hover:bg-amber-400 text-[#0A006E] border border-[#0A006E]/30 text-[11px] font-montserrat font-black flex items-center gap-1 transition shadow-2xs"
-                      title="Send RJ11 Drawer Kick Pulse via ESC/POS (POS Cashier Only)"
-                    >
-                      <KeyRound className="w-3.5 h-3.5 text-[#0A006E]" />
-                      <span>Kick Drawer</span>
-                    </button>
-                  )}
-
-                  {/* Counter Order Queue / Held Carts Toggle Button — ONLY shown on POS Counter Cashier */}
-                  {posStationMode === 'COUNTER_CASHIER' && (
-                    <button
-                      type="button"
-                      onClick={() => setIsHeldCartsOpen(prev => !prev)}
-                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-montserrat font-bold flex items-center gap-1.5 border transition ${
-                        branchHeldCarts.length > 0
-                          ? 'bg-[#FFDE00] text-[#0A006E] border-[#0A006E] shadow-2xs'
-                          : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
-                      }`}
-                      title={`View Collection Queue for POS Cashier ${activeCounterCashierName}`}
-                    >
-                      <Clock className="w-3.5 h-3.5" />
-                      <span>Queue / Hold ({branchHeldCarts.length})</span>
-                    </button>
-                  )}
-
-                  {/* Put on Hold Button */}
-                  {posStationMode === 'COUNTER_CASHIER' && cart.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handlePutCartOnHold}
-                      className="px-2.5 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 text-[11px] font-montserrat font-bold flex items-center gap-1 transition shadow-2xs"
-                      title="Put active cart on hold to serve next customer"
-                    >
-                      <PauseCircle className="w-3.5 h-3.5 text-amber-800" />
-                      <span>Put on Hold</span>
-                    </button>
-                  )}
-
                   {cart.length > 0 && (
                     <button
                       type="button"
@@ -2718,76 +2650,6 @@ export const PosTerminal: React.FC = () => {
                 </button>
               </div>
 
-              {/* Dedicated Cashier Barcode Scanner for Direct Checkout List Add */}
-              <div className="p-3 my-2 rounded-xl bg-gradient-to-r from-[#0A006E]/5 to-slate-50 border-2 border-[#0A006E]/20 space-y-2">
-                <div className="flex items-center justify-between text-[11px] font-montserrat font-black text-[#0A006E]">
-                  <span className="flex items-center gap-1.5 uppercase">
-                    <Barcode className="w-4 h-4 text-[#0A006E]" />
-                    <span>Scan Bottle to Add to Checkout List</span>
-                  </span>
-                  <span className="text-[10px] text-slate-500 font-mono">Laser / Camera / Keypad</span>
-                </div>
-                <form onSubmit={handleCheckoutBarcodeSubmit} className="flex gap-1.5">
-                  <div className="relative flex-1">
-                    <Barcode className="w-4 h-4 text-[#0A006E] absolute left-2.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      ref={checkoutBarcodeInputRef}
-                      type="text"
-                      value={checkoutBarcodeInput}
-                      onChange={(e) => setCheckoutBarcodeInput(e.target.value)}
-                      placeholder="Scan bottle barcode (EAN-13 / UPC / SKU)..."
-                      className="w-full pl-8 pr-7 py-2 bg-white border-2 border-slate-300 focus:border-[#0A006E] rounded-lg text-xs font-mono focus:outline-none text-slate-900 placeholder:text-slate-400"
-                    />
-                    {checkoutBarcodeInput && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCheckoutBarcodeInput('');
-                          checkoutBarcodeInputRef.current?.focus();
-                        }}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsCameraModalOpen(true)}
-                    className="px-2.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold border border-slate-200 transition flex items-center gap-1 shrink-0 cursor-pointer"
-                    title="Open Camera Barcode Scanner"
-                  >
-                    <Camera className="w-3.5 h-3.5 text-[#0A006E]" />
-                    <span className="hidden sm:inline">Camera</span>
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-3.5 py-2 bg-[#0A006E] hover:bg-[#060046] active:scale-95 text-[#FFDE00] rounded-lg font-montserrat font-black text-xs transition flex items-center gap-1 shrink-0 shadow-xs cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Add</span>
-                  </button>
-                </form>
-                {/* 1-Tap Quick Scan Test Chips */}
-                <div className="flex items-center gap-1 flex-wrap pt-0.5">
-                  <span className="text-[9px] font-montserrat font-black text-slate-400 uppercase shrink-0">
-                    Quick Test:
-                  </span>
-                  {QUICK_POS_SCAN_SAMPLES.slice(0, 5).map(sample => (
-                    <button
-                      key={sample.code}
-                      type="button"
-                      onClick={() => processScannedBarcode(sample.code)}
-                      className="px-2 py-0.5 rounded bg-white hover:bg-[#FFDE00] text-slate-700 hover:text-[#0A006E] border border-slate-200 hover:border-[#0A006E] text-[9px] font-montserrat font-bold transition flex items-center gap-1 cursor-pointer active:scale-95"
-                      title={`Simulate barcode scan: ${sample.label} (${sample.code})`}
-                    >
-                      <Barcode className="w-2.5 h-2.5 shrink-0" />
-                      <span>{sample.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               {holdFeedback && (
                 <div className="my-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 text-xs font-medium flex items-center justify-between animate-in fade-in">
                   <div className="flex items-center gap-1.5">
@@ -2803,221 +2665,6 @@ export const PosTerminal: React.FC = () => {
                   </button>
                 </div>
               )}
-
-              {/* Expandable Counter Order Queue & Held Carts Panel — ONLY shown on POS Counter Cashier */}
-              {posStationMode === 'COUNTER_CASHIER' && isHeldCartsOpen && (
-                <div className="my-2 p-3 rounded-xl bg-slate-50 border-2 border-[#0A006E] space-y-2.5 animate-in fade-in">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-montserrat font-black text-[#0A006E] uppercase flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5" />
-                      <span>
-                        Collection Queue • Cashier {activeCounterCashierName} ({branchHeldCarts.length})
-                      </span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setIsHeldCartsOpen(false)}
-                      className="text-xs text-slate-400 hover:text-slate-700 font-bold"
-                    >
-                      Close
-                    </button>
-                  </div>
-
-                  {branchHeldCarts.length === 0 ? (
-                    <p className="text-xs text-slate-500 py-3 text-center">
-                      No orders currently in the counter queue or on hold.
-                    </p>
-                  ) : (
-                    <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                      {branchHeldCarts.map((held) => {
-                        const status = held.queueStatus || 'QUEUED_AT_COUNTER';
-                        const isReady = status === 'READY_FOR_COLLECTION';
-                        return (
-                          <div
-                            key={held.id}
-                            className={`p-2.5 rounded-xl bg-white border shadow-2xs space-y-2 ${
-                              isReady ? 'border-emerald-500 bg-emerald-50/40' : 'border-slate-200'
-                            }`}
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <div className="flex flex-wrap items-center gap-1.5">
-                                  <span className="font-mono font-bold text-xs text-[#0A006E]">
-                                    {held.holdNumber}
-                                  </span>
-                                  <span className="text-[10px] font-mono text-slate-500">
-                                    {held.createdAt}
-                                  </span>
-                                  <span className="text-[10px] font-bold text-[#1E9E60] bg-emerald-50 px-1.5 py-0.5 rounded">
-                                    {formatKes(held.totalKes)}
-                                  </span>
-                                  <span className="text-[9px] font-montserrat font-black uppercase px-1.5 py-0.5 rounded bg-[#0A006E]/10 text-[#0A006E]">
-                                    {isReady
-                                      ? '✓ Ready for Collection'
-                                      : status === 'PREPARING_DRINKS'
-                                      ? 'Preparing Drinks'
-                                      : status === 'ON_HOLD_PENDING_PAYMENT'
-                                      ? 'On Hold • Pending Payment'
-                                      : 'Queued at Counter'}
-                                  </span>
-                                </div>
-                                <div className="text-[11px] text-slate-800 font-bold truncate mt-0.5">
-                                  {held.items.map(i => `${i.quantity}× ${i.product.name}`).join(', ')}
-                                </div>
-                                <div className="text-[10px] text-slate-500 font-mono truncate">
-                                  Sales Rep: {held.affiliateName || held.heldByName} •{' '}
-                                  {held.paymentOption === 'PRINT_RECEIPT_AND_HOLD'
-                                    ? 'Receipt Printed (On Hold)'
-                                    : 'Pay on Collection'}
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="flex flex-wrap items-center justify-end gap-1.5 pt-1 border-t border-slate-100">
-                              <button
-                                type="button"
-                                onClick={() => setPrintingQueueTicket(held)}
-                                className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-[10px] font-montserrat font-bold flex items-center gap-1 transition"
-                                title="Print 80mm Thermal Receipt"
-                              >
-                                <Printer className="w-3 h-3 text-[#0A006E]" />
-                                <span>Print Receipt</span>
-                              </button>
-
-                              {!isReady && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    updateHeldCartQueueStatus(held.id, {
-                                      queueStatus: 'READY_FOR_COLLECTION',
-                                      preparedByCashierName: currentUser.name,
-                                      readyAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                                    });
-                                    playBeep(1320, 140);
-                                  }}
-                                  className="px-2 py-1 rounded-lg bg-[#34D186] hover:bg-emerald-950 text-[#FFDE00] text-[10px] font-montserrat font-bold transition"
-                                >
-                                  Ready for Collection
-                                </button>
-                              )}
-
-                              <button
-                                type="button"
-                                onClick={() => handleRecallCart(held.id)}
-                                className="px-2.5 py-1 rounded-lg bg-[#0A006E] hover:bg-[#060046] text-[#FFDE00] text-[10px] font-montserrat font-bold flex items-center gap-1 transition"
-                                title="Load into Counter Cart to settle payment"
-                              >
-                                <PlayCircle className="w-3 h-3" />
-                                <span>{posStationMode === 'COUNTER_CASHIER' ? 'Collect Payment' : 'Recall'}</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => removeHeldCart(held.id)}
-                                className="p-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition"
-                                title="Discard order"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Step 3: Direct Counter Sale vs Sales Representative Order Attribution */}
-              <div className="py-3 border-b border-slate-200 bg-amber-50/60 -mx-4 sm:-mx-5 px-4 sm:px-5 space-y-2">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <label className="text-[11px] font-montserrat font-black text-[#0A006E] uppercase flex items-center gap-1">
-                    <Sparkles className="w-3.5 h-3.5 text-[#0A006E]" />
-                    <span>
-                      {posStationMode === 'COUNTER_CASHIER'
-                        ? 'Sale Source: Direct Walk-In or Sales Rep Order'
-                        : 'Sales Representative & Preferred Price Mode'}
-                    </span>
-                  </label>
-                  <div className="flex items-center gap-1.5">
-                    {posStationMode === 'COUNTER_CASHIER' && activeSalesLadyAffiliate && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedAffiliate(null);
-                          setCounterCashierSaleMode('DIRECT_SALE');
-                        }}
-                        className="px-2 py-0.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-montserrat font-bold text-[10px] transition cursor-pointer"
-                        title="Switch to Direct Walk-In Counter Sale without Sales Rep"
-                      >
-                        Switch to Direct Sale
-                      </button>
-                    )}
-                    {activeSalesLadyAffiliate && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRepHistoryPeriod('ALL');
-                          setRepHistorySearch('');
-                          setIsRepHistoryModalOpen(true);
-                        }}
-                        className="px-2 py-0.5 rounded-lg bg-[#0A006E] hover:bg-[#060046] text-[#FFDE00] font-montserrat font-black text-[10px] flex items-center gap-1 transition cursor-pointer"
-                      >
-                        <History className="w-3 h-3" />
-                        <span>Previous Sales ({activeRepPreviousOrders.length})</span>
-                      </button>
-                    )}
-                    {activeSalesLadyAffiliate && (
-                      <span className="text-[10px] font-bold text-[#1E9E60] bg-emerald-100 px-2 py-0.5 rounded">
-                        {activeSalesLadyAffiliate.code} • {activeSalesLadyAffiliate.commissionMode === 'PREFERRED_PRICE_PROFIT_ONLY' ? '100% Profit' : `${activeSalesLadyAffiliate.commissionRatePercent ?? defaultAffiliateCommissionRate}% + Profit`}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <select
-                    value={activeSalesLadyAffiliate?.id || ''}
-                    onChange={(e) => {
-                      const aff = affiliates.find(a => a.id === e.target.value) || null;
-                      setSelectedAffiliate(aff);
-                      if (aff && posStationMode === 'COUNTER_CASHIER') {
-                        setCounterCashierSaleMode('RECEIVE_REP_ORDERS');
-                      } else if (!aff && posStationMode === 'COUNTER_CASHIER') {
-                        setCounterCashierSaleMode('DIRECT_SALE');
-                      }
-                    }}
-                    className="w-full text-xs font-semibold bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#0A006E]"
-                  >
-                    <option value="">Direct Counter Sale (Walk-In Customer • Standard Company Price)</option>
-                    {(branchAffiliates.length > 0 ? branchAffiliates : affiliates).map(a => (
-                      <option key={a.id} value={a.id}>
-                        Order from Sales Rep: {a.name} ({a.code} • {a.allowPreferredPrice !== false ? 'Preferred Price Enabled' : 'Fixed Price'})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {activeSalesLadyAffiliate && (
-                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[10px]">
-                    <label className="flex items-center gap-1.5 font-bold text-slate-700 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={activeSalesLadyAffiliate.allowPreferredPrice !== false}
-                        onChange={(e) => {
-                          updateAffiliateCommissionSettings(activeSalesLadyAffiliate.id, {
-                            allowPreferredPrice: e.target.checked
-                          });
-                        }}
-                        className="rounded border-slate-300 text-[#1E9E60] focus:ring-[#34D186]"
-                      />
-                      <span>Allow Preferred Price (Company Price Unchanged)</span>
-                    </label>
-                    <span className="text-[#1E9E60] font-mono font-bold">
-                      Profit = Preferred Price − Company Price
-                    </span>
-                  </div>
-                )}
-              </div>
 
               {/* Cart Items List — Full App List on Mobile, Compact Scroll on Desktop */}
               <div className="my-2">

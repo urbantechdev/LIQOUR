@@ -308,17 +308,25 @@ export function getRolePermissions(role: ExtendedErpRole, department: Department
         department: effectiveDepartment,
         allowedTabs: ['POS'],
         defaultTab: 'POS',
-        description: 'Frontline POS checkout terminal. Strictly blocked from ledgers, settings, HR files, and other department interfaces.',
+        description: 'Counter Cashier retail checkout register. Dedicated retail checkout screen waiting for scanned items or incoming Sales Representative queue orders without inventory browsing.',
         canModifyBranchStructure: false,
         canOverridePricing: false,
         canAccessGeneralLedger: false,
-        canAccessEtimsLogs: false,
+        canAccessEtimsLogs: true,
         canProcessSales: true,
         canAccessHrPayroll: false,
         isRestricted: true,
         allBranchesAccess: false,
         maxDiscountPercent: 5,
-        permissions: ['sales.view', 'sales.create', 'inventory.view', 'invoice.view']
+        permissions: [
+          'sales.view',
+          'sales.create',
+          'sales.edit',
+          'sales.refund',
+          'invoice.view',
+          'invoice.create',
+          'reports.view'
+        ]
       };
 
     case 'HR_PAYROLL':

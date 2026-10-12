@@ -4,7 +4,7 @@ import {
   onSnapshot,
   Unsubscribe
 } from 'firebase/firestore';
-import { getAuthHeaders, getStoredSessionToken } from './apiAuth';
+import { getAuthHeaders } from './apiAuth';
 import { syncUserToFirebase } from './firebaseSyncEngine';
 import {
   db,
@@ -668,7 +668,7 @@ export function subscribeToIndependentStaffDatabase(
   let eventSource: EventSource | null = null;
   if (typeof window !== 'undefined' && typeof window.EventSource !== 'undefined') {
     try {
-      eventSource = new EventSource(`/api/erp/live-stream?token=${encodeURIComponent(getStoredSessionToken())}`);
+      eventSource = new EventSource('/api/erp/live-stream');
       eventSource.addEventListener('INITIAL_SNAPSHOT', (evt: MessageEvent) => {
         if (isDisposed) return;
         try {

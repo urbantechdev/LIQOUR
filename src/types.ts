@@ -18,8 +18,43 @@ export type BranchTier =
   | 'WAREHOUSE' 
   | 'MAIN_STORE' 
   | 'DISTRIBUTOR' 
-  | 'SUPERMARKET'
-  | 'LIQUOR_STORE';
+  | 'SUPERMARKET' 
+  | 'LIQUOR_STORE'
+  | 'RESTAURANT';
+
+export interface RestaurantFoodCategory {
+  id: string;
+  name: string;
+  description?: string;
+  displayOrder?: number;
+}
+
+export interface RestaurantFoodItem {
+  id: string;
+  branchId: string; // Linked to this independent restaurant branch
+  name: string;
+  categoryId: string;
+  categoryName?: string;
+  priceKes: number;
+  costPriceKes?: number;
+  description?: string;
+  isAvailable?: boolean;
+  preparationTimeMinutes?: number;
+  imageUrl?: string;
+  servingPortion?: string;
+}
+
+export interface AttachedAlcoholBill {
+  billNumber: string;
+  branchName?: string;
+  cashierName?: string;
+  customerName?: string;
+  items: SaleItem[];
+  totalKes: number;
+  notes?: string;
+  linkedOrderId?: string;
+  timestamp?: string;
+}
 
 export type StockCategory = 'IPS' | 'LPS'; // Imported Products Stock vs Local Products Stock
 
@@ -80,6 +115,10 @@ export interface Branch {
   isSupermarket?: boolean; // True for Liquor Supermarket tier with multi-lane scanning POS
   aisleCount?: number; // Total floor aisles/shelf zones in the supermarket
   expressScanningEnabled?: boolean; // Dedicated high-speed barcode basket scanning
+  isRestaurant?: boolean; // True for Independent Restaurant branch
+  tableCount?: number; // Total dine-in table count
+  cuisineType?: string; // e.g. "Kenyan Local & Nyama Choma", "Continental & Grill", "Fast Food"
+  allowAlcoholBilling?: boolean; // Can consolidate client alcohol bill onto food receipt
 }
 
 export interface Product {
@@ -192,6 +231,9 @@ export interface SaleItem {
   stockBeforeSale?: number; // Exact bottles available at branch before sale
   stockAfterSale?: number; // Exact bottles remaining at branch after sale subtraction
   assetValueDeductedKes?: number; // Cost asset value subtracted (quantity * costPrice)
+  itemType?: 'ALCOHOL' | 'FOOD'; // Differentiates food dishes from alcohol drinks
+  foodCategoryName?: string;
+  notes?: string;
 }
 
 export interface SaleOrder {
@@ -201,6 +243,7 @@ export interface SaleOrder {
   deliveryAddress?: string; // Customer delivery location for Website orders
   branchId: string;
   branchName: string;
+  branchTier?: BranchTier;
   cashierId: string;
   cashierName: string;
   consumerId?: string; // First-class Consumer identity reference
@@ -210,8 +253,14 @@ export interface SaleOrder {
   customerEmail?: string;
   customerPhone?: string;
   customerKraPin?: string;
+  tableNumber?: string; // Table number for Restaurant dine-in orders
   saleType: 'RETAIL' | 'WHOLESALE';
   items: SaleItem[];
+  attachedAlcoholBill?: AttachedAlcoholBill; // Attached client alcohol bill from bar/drinks counter
+  attachedAlcoholBillNumber?: string;
+  attachedAlcoholBillAmountKes?: number;
+  foodSubtotalKes?: number; // Food portion subtotal (KES)
+  alcoholSubtotalKes?: number; // Alcohol portion subtotal (KES)
   subtotalKes: number; // Company taxable net (excl. VAT)
   vatAmountKes: number; // Company 16% VAT (on company price)
   exciseAmountKes: number;
@@ -237,6 +286,8 @@ export interface SaleOrder {
     | 'PENDING_RECONCILIATION'
     | 'RECONCILIATION_FAILED';
   idempotencyKey?: string;
+  mpesaReceiptNumber?: string;
+  createdAt: string;
   etimsInvoiceNumber: string;
   etimsQrPayload: string;
   etimsTransmitted: boolean;
@@ -246,8 +297,6 @@ export interface SaleOrder {
   assistedByStaffName?: string;
   checkoutLane?: string; // Checkout till lane (e.g. Lane 1 - Express, Lane 2, Lane 3)
   creditNoteNumber?: string; // Reversing credit note reference
-  creditNoteId?: string;
-  creditNoteIssued?: boolean;
   refundReason?: string; // Reason if refunded via credit note
   refundedAt?: string;
   refundedBy?: string;

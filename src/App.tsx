@@ -153,10 +153,13 @@ const ErpDashboard: React.FC = () => {
     );
   }
 
-  const isSalesLadyLogin =
-    currentRole === 'STAFF' && (currentDepartment === 'POS' || currentDepartment === 'AFFILIATES');
-  const effectiveActiveTab: ActiveNavTab = isSalesLadyLogin ? 'POS' : activeTab;
-  const isCurrentTabAllowed = isSalesLadyLogin
+  // Counter Cashier has their dedicated retail checkout screen; Sales Representative has their order-taking screen
+  const isPosDedicatedRole =
+    (currentRole === 'STAFF' && (currentDepartment === 'AFFILIATES' || currentDepartment === 'POS')) ||
+    currentRole === 'CASHIER' ||
+    posStationMode === 'SALES_LADY';
+  const effectiveActiveTab: ActiveNavTab = isPosDedicatedRole ? 'POS' : activeTab;
+  const isCurrentTabAllowed = isPosDedicatedRole
     ? true
     : isTabAllowed(currentRole, currentDepartment, effectiveActiveTab);
 
@@ -192,12 +195,12 @@ const ErpDashboard: React.FC = () => {
           <Sidebar activeTab={effectiveActiveTab} onSelectTab={setActiveTab} />
 
           {/* Dynamic Module View with Strict RBAC Route Guard */}
-          <main className="flex-1 min-w-0 p-3 pt-7 pb-32 sm:p-6 sm:pt-10 md:pb-10 lg:p-8 lg:pt-10">
+          <main className="flex-1 min-w-0 p-3 pt-3 pb-32 sm:p-5 sm:pt-4 md:pb-10 lg:p-6 lg:pt-4">
             <div className="max-w-7xl mx-auto">
-              {/* Universal Statement Generator + Live User Activity, Login & Device Monitor on EVERY Dashboard (Hidden on POS for clean retail register) */}
-              {effectiveActiveTab !== 'POS' && <UniversalDashboardCommandBar activeTab={effectiveActiveTab} />}
+              {/* Universal Statement Generator + Live User Activity, Login & Device Monitor on EVERY Dashboard */}
+              <UniversalDashboardCommandBar activeTab={effectiveActiveTab} />
 
-              {isSalesLadyLogin ? (
+              {isPosDedicatedRole ? (
                 <PosTerminal />
               ) : !isCurrentTabAllowed ? (
                 // Access Restricted Boundary Enforced Screen

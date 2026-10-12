@@ -59,8 +59,15 @@ import {
   SalesNetworkCustomerSegment,
   LiveLoggedInCustomer,
   BranchMarketClassTier,
-  BranchProductPriceOverride
+  BranchProductPriceOverride,
+  RestaurantFoodCategory,
+  RestaurantFoodItem,
+  AttachedAlcoholBill
 } from '../types';
+import {
+  DEFAULT_RESTAURANT_FOOD_CATEGORIES,
+  buildInitialRestaurantFoodItems
+} from '../data/restaurantDefaults';
 import { detectKenyanMobileCarrier } from '../utils/kenyanMobileCarrier';
 import { getRolePermissions } from '../utils/rbac';
 import {
@@ -153,23 +160,24 @@ import {
   syncInventoryItemsToBranchLedgers,
   subscribeToBranchInventoryLedgers,
   seedInitialUnifiedStateSnapshot,
-  markRemoteUnifiedStateReceived,
-  syncProductRecordToFirebase,
-  syncProductsBatchToFirebase
+  markRemoteUnifiedStateReceived
 } from '../utils/unifiedErpDatabase';
+import { getAuthHeaders, setStoredSessionToken, getStoredSessionToken } from '../utils/apiAuth';
 import {
   syncUserToFirebase,
   syncProductCreatedToFirebase,
   syncProductScannedToFirebase,
   syncDocumentToFirebase
 } from '../utils/firebaseSyncEngine';
-import { getAuthHeaders, setStoredSessionToken, getStoredSessionToken } from '../utils/apiAuth';
 
 export interface CartItem {
   product: Product;
   quantity: number;
   unitPrice: number;
   affiliateMarkupPerUnit: number;
+  itemType?: 'ALCOHOL' | 'FOOD';
+  foodCategoryName?: string;
+  notes?: string;
 }
 
 interface ErpContextType {
@@ -261,11 +269,26 @@ interface ErpContextType {
   selectedAffiliate: Affiliate | null;
   setSelectedAffiliate: (affiliate: Affiliate | null) => void;
   addToCart: (product: Product, quantity?: number, affiliateMarkup?: number, preferredUnitPrice?: number) => void;
+  addFoodToCart: (foodItem: RestaurantFoodItem, quantity?: number, notes?: string) => void;
   removeFromCart: (productId: string) => void;
   updateCartItemQty: (productId: string, quantity: number) => void;
   updateCartItemMarkup: (productId: string, markup: number) => void;
   updateCartItemPreferredPrice: (productId: string, preferredUnitPrice: number) => void;
   clearCart: () => void;
+  attachedAlcoholBill: AttachedAlcoholBill | null;
+  setAttachedAlcoholBill: (bill: AttachedAlcoholBill | null) => void;
+  restaurantTableNumber: string;
+  setRestaurantTableNumber: (tableNumber: string) => void;
+
+  // Restaurant Food & Menu Management
+  restaurantFoodCategories: RestaurantFoodCategory[];
+  restaurantFoodItems: RestaurantFoodItem[];
+  addRestaurantFoodItem: (item: Omit<RestaurantFoodItem, 'id'>) => Promise<RestaurantFoodItem>;
+  updateRestaurantFoodItem: (id: string, updates: Partial<RestaurantFoodItem>) => Promise<void>;
+  deleteRestaurantFoodItem: (id: string) => Promise<void>;
+  addRestaurantFoodCategory: (category: Omit<RestaurantFoodCategory, 'id'>) => Promise<RestaurantFoodCategory>;
+  updateRestaurantFoodCategory: (id: string, updates: Partial<RestaurantFoodCategory>) => Promise<void>;
+  deleteRestaurantFoodCategory: (id: string) => Promise<void>;
   holdCurrentCart: (params?: {
     customerName?: string;
     customerPhone?: string;
@@ -960,6 +983,18 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [selectedAffiliate, setSelectedAffiliate] = useState<Affiliate | null>(null);
   const [recalledSalesPerson, setRecalledSalesPerson] = useState<{ id?: string; name: string } | null>(null);
 
+  // Restaurant Food State & Attached Client Alcohol Bill
+  const [restaurantFoodCategories, setRestaurantFoodCategories] = usePersisted<RestaurantFoodCategory[]>(
+    'restaurant_food_categories_v1',
+    DEFAULT_RESTAURANT_FOOD_CATEGORIES
+  );
+  const [restaurantFoodItems, setRestaurantFoodItems] = usePersisted<RestaurantFoodItem[]>(
+    'restaurant_food_items_v1',
+    () => buildInitialRestaurantFoodItems('branch-restaurant-default')
+  );
+  const [attachedAlcoholBill, setAttachedAlcoholBill] = useState<AttachedAlcoholBill | null>(null);
+  const [restaurantTableNumber, setRestaurantTableNumber] = useState<string>('');
+
   const [orders, setOrders] = usePersisted<SaleOrder[]>('orders', INITIAL_ORDERS);
   const [etimsInvoices, setEtimsInvoices] = usePersisted<ETimsInvoice[]>('etims', INITIAL_ETIMS_INVOICES);
   const [lastCompletedInvoice, setLastCompletedInvoice] = useState<ETimsInvoice | null>(null);
@@ -1113,7 +1148,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   }, [orders, websiteDeliveryOrders, setConsumers]);
 
-  // Automatically synchronize active user profile directly to Firebase Firestore users/{userId}
+  // Real-time synchronization of active user profile to Firebase
   useEffect(() => {
     if (currentUser && currentUser.id) {
       void syncUserToFirebase(currentUser);
@@ -3610,7 +3645,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Ensure the browser always holds a valid server-signed session token for this role/department/branch
     fetch('/api/auth/terminal-session', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         userId: matchedUser.id,
         name: userName,
@@ -3954,11 +3989,16 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         headOfficeBranch;
     } else if (branchData.tier === 'WAREHOUSE') {
       resolvedParentBranch = headOfficeBranch;
+    } else if (branchData.tier === 'RESTAURANT') {
+      // Independent restaurant branch: operates with complete independence
+      resolvedParentBranch = undefined;
     }
 
     const newBranch: Branch = {
       ...branchData,
       id: newBranchId,
+      isRestaurant: branchData.tier === 'RESTAURANT' ? true : branchData.isRestaurant,
+      allowDirectSales: branchData.tier === 'RESTAURANT' ? true : branchData.tier !== 'WAREHOUSE',
       isHeadOffice: branchData.tier === 'MAIN_STORE' ? true : branchData.isHeadOffice,
       latitude: branchData.latitude ?? resolvedGeo.latitude,
       longitude: branchData.longitude ?? resolvedGeo.longitude,
@@ -4050,6 +4090,12 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setDistributors(nextDistributors);
         void pushUnifiedErpStateToFirestore('distributors', nextDistributors, currentUser.name, true);
       }
+    }
+
+    // Initialize independent food menu if this branch is a Restaurant
+    if (newBranch.tier === 'RESTAURANT') {
+      const initialFood = buildInitialRestaurantFoodItems(newBranch.id);
+      setRestaurantFoodItems(prev => [...initialFood, ...prev]);
     }
 
     // Initialize independent 0-stock ledger rows for a new Shop/Distributor so it acquires stock from Warehouse (Main Store)
@@ -4320,30 +4366,22 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // If accepted, update inventory on hand for active branch and move activated product to the top
     if (result.success && result.product && result.unpackedBottles) {
-      setProducts(prev => [
-        result.product!,
-        ...prev.filter(p => p.id !== result.product!.id)
-      ]);
-
-      void syncProductScannedToFirebase(result.product!, {
+      void syncProductScannedToFirebase(result.product, {
         branchId: activeBranchId,
         branchName: activeBranch.name,
         scanType: result.scanType || 'SINGLE_BOTTLE',
         barcode: rawBarcode,
-        sku: result.product!.sku,
+        sku: result.product.sku,
         scannerUserId: currentUser.id,
         scannerName: currentUser.name,
         bottlesCount: result.unpackedBottles,
         mode
       });
 
-      void syncProductRecordToFirebase(result.product!, true, {
-        branchId: activeBranchId,
-        barcode: rawBarcode,
-        scanType: result.scanType,
-        scannerUserId: currentUser.id,
-        scannerName: currentUser.name
-      });
+      setProducts(prev => [
+        result.product!,
+        ...prev.filter(p => p.id !== result.product!.id)
+      ]);
 
       setInventoryItems(prev => {
         const existingIdx = prev.findIndex(
@@ -4575,7 +4613,6 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setProducts(prev => [newProduct, ...prev]);
     void syncProductCreatedToFirebase(newProduct);
-    void syncProductRecordToFirebase(newProduct, false);
 
     const packSize = Math.max(1, prodData.packSize || 12);
     const initialBottles = Math.max(0, initialCases) * packSize;
@@ -4641,6 +4678,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setProducts(prev => prev.map(p => (p.id === productId ? updatedProduct : p)));
+    void syncProductCreatedToFirebase(updatedProduct);
 
     // Sync active POS cart if product is currently in cart
     setCart(prev =>
@@ -4716,9 +4754,6 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return prev;
     });
-
-    void syncProductCreatedToFirebase(updatedProduct);
-    void syncProductRecordToFirebase(updatedProduct, false);
 
     return updatedProduct;
   };
@@ -5049,9 +5084,92 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const clearCart = () => {
     setCart([]);
     setRecalledSalesPerson(null);
+    setAttachedAlcoholBill(null);
+    setRestaurantTableNumber('');
     if (currentDepartment !== 'AFFILIATES') {
       setSelectedAffiliate(null);
     }
+  };
+
+  const addFoodToCart = (foodItem: RestaurantFoodItem, quantity = 1, notes?: string) => {
+    const syntheticProduct: Product = {
+      id: foodItem.id,
+      sku: `FOOD-${foodItem.id.toUpperCase()}`,
+      barcode: `FOOD-${foodItem.id}`,
+      caseBarcode: '',
+      name: foodItem.name,
+      brand: 'Kitchen & Grill',
+      category: 'LPS',
+      subCategory: foodItem.categoryName || 'Food',
+      volumeMl: 0,
+      packSize: 1,
+      countryOfOrigin: 'Kenya',
+      warehouseCostKes: foodItem.costPriceKes || Math.round(foodItem.priceKes * 0.6),
+      retailPriceKes: foodItem.priceKes,
+      wholesalePriceKes: foodItem.priceKes,
+      minWholesaleQty: 1,
+      vatRate: 0.16,
+      exciseDutyPerLitreKes: 0,
+      kraExciseStampType: 'DIGITAL_EXCISE_STAMP',
+      alcoholPercentage: 0
+    };
+
+    setCart(prev => {
+      const existing = prev.find(item => item.product.id === foodItem.id);
+      if (existing) {
+        return prev.map(item =>
+          item.product.id === foodItem.id
+            ? { ...item, quantity: item.quantity + quantity, notes: notes || item.notes }
+            : item
+        );
+      }
+      return [
+        ...prev,
+        {
+          product: syntheticProduct,
+          quantity,
+          unitPrice: foodItem.priceKes,
+          affiliateMarkupPerUnit: 0,
+          itemType: 'FOOD',
+          foodCategoryName: foodItem.categoryName,
+          notes
+        }
+      ];
+    });
+  };
+
+  const addRestaurantFoodItem = async (item: Omit<RestaurantFoodItem, 'id'>): Promise<RestaurantFoodItem> => {
+    const newItem: RestaurantFoodItem = {
+      ...item,
+      id: `food-${Date.now().toString().slice(-6)}`
+    };
+    setRestaurantFoodItems(prev => [newItem, ...prev]);
+    return newItem;
+  };
+
+  const updateRestaurantFoodItem = async (id: string, updates: Partial<RestaurantFoodItem>): Promise<void> => {
+    setRestaurantFoodItems(prev => prev.map(item => item.id === id ? { ...item, ...updates } : item));
+  };
+
+  const deleteRestaurantFoodItem = async (id: string): Promise<void> => {
+    setRestaurantFoodItems(prev => prev.filter(item => item.id !== id));
+  };
+
+  const addRestaurantFoodCategory = async (category: Omit<RestaurantFoodCategory, 'id'>): Promise<RestaurantFoodCategory> => {
+    const newCat: RestaurantFoodCategory = {
+      ...category,
+      id: `cat-${Date.now().toString().slice(-6)}`
+    };
+    setRestaurantFoodCategories(prev => [...prev, newCat]);
+    return newCat;
+  };
+
+  const updateRestaurantFoodCategory = async (id: string, updates: Partial<RestaurantFoodCategory>): Promise<void> => {
+    setRestaurantFoodCategories(prev => prev.map(cat => cat.id === id ? { ...cat, ...updates } : cat));
+  };
+
+  const deleteRestaurantFoodCategory = async (id: string): Promise<void> => {
+    setRestaurantFoodCategories(prev => prev.filter(cat => cat.id !== id));
   };
 
   const holdCurrentCart = (params?: {
@@ -5307,6 +5425,12 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     });
 
+    const attachedAlcoholAmountKes = attachedAlcoholBill ? attachedAlcoholBill.totalKes : 0;
+    if (attachedAlcoholAmountKes > 0) {
+      totalSaleKes += attachedAlcoholAmountKes;
+      companySalesTotalKes += attachedAlcoholAmountKes;
+    }
+
     const { taxableAmount, vatAmount } = calculateVatBreakdown(companySalesTotalKes);
     const idempotencyKey = `pos-idem-${activeBranch.id}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
@@ -5447,6 +5571,10 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           (effectiveAffiliateName ? `Referral: ${effectiveAffiliateName}` : 'Walk-in Customer'),
         customerPhone: params.customerPhone || params.mpesaPhone,
         customerKraPin: params.customerKraPin,
+        tableNumber: restaurantTableNumber || undefined,
+        attachedAlcoholBill: attachedAlcoholBill || undefined,
+        attachedAlcoholBillNumber: attachedAlcoholBill?.billNumber,
+        attachedAlcoholBillAmountKes: attachedAlcoholBill?.totalKes,
         saleType: isWholesaleSale ? 'WHOLESALE' : 'RETAIL',
         items: saleItems,
         subtotalKes: taxableAmount,
@@ -5565,6 +5693,10 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       customerName: params.customerName || (effectiveAffiliateName ? `Referral: ${effectiveAffiliateName}` : 'Walk-in Customer'),
       customerPhone: params.customerPhone || params.mpesaPhone,
       customerKraPin: params.customerKraPin,
+      tableNumber: restaurantTableNumber || undefined,
+      attachedAlcoholBill: attachedAlcoholBill || undefined,
+      attachedAlcoholBillNumber: attachedAlcoholBill?.billNumber,
+      attachedAlcoholBillAmountKes: attachedAlcoholBill?.totalKes,
       saleType: isWholesaleSale ? 'WHOLESALE' : 'RETAIL',
       items: saleItems,
       subtotalKes: Number(checkoutData.subtotalKes ?? taxableAmount),
@@ -5904,9 +6036,9 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setOrders(prev => [newOrder, ...prev]);
     setEtimsInvoices(prev => [newInvoice, ...prev]);
+    void syncDocumentToFirebase('ORDER', newOrder.id, newOrder as any);
+    void syncDocumentToFirebase('ETIMS', newInvoice.id, newInvoice as any);
     setLastCompletedInvoice(newInvoice);
-    void syncDocumentToFirebase('ORDER', newOrder.orderNumber, newOrder as unknown as Record<string, unknown>);
-    void syncDocumentToFirebase('ETIMS', newInvoice.invoiceNumber, newInvoice as unknown as Record<string, unknown>);
     clearCart();
 
     logUserActivity({
@@ -6102,7 +6234,6 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setWebsiteDeliveryOrders(prev => [newWebOrder, ...prev]);
-    void syncDocumentToFirebase('ORDER', newWebOrder.orderNumber, newWebOrder as unknown as Record<string, unknown>);
 
     // Deduct ordered stock from the fulfilling branch and any linked invoice onboarding ledger
     const targetBranchIds = Array.from(new Set([fulfillingBranch.id, activeBranch.id]));
@@ -6829,10 +6960,9 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         currentUser.name || 'SUPPLY-INVOICE',
         true
       );
+      void syncDocumentToFirebase('SUPPLY_INVOICE', newInvoice.id, newInvoice as any);
       return nextInvoices;
     });
-
-    void syncDocumentToFirebase('SUPPLY_INVOICE', newInvoice.invoiceNumber, newInvoice as unknown as Record<string, unknown>);
 
     return newInvoice;
   };
@@ -6957,7 +7087,6 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setProducts(prev => [...createdProducts, ...prev]);
     createdProducts.forEach(p => void syncProductCreatedToFirebase(p));
-    void syncProductsBatchToFirebase(createdProducts);
     setInventoryItems(prev => [...newInventoryEntries, ...prev]);
 
     const addedSubtotal = addedInvoiceItems.reduce((s, i) => s + i.totalCostKes, 0);
@@ -6973,7 +7102,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setSupplyInvoices(prev => prev.map(inv => (inv.id === invoiceId ? updatedInvoice : inv)));
-    void syncDocumentToFirebase('SUPPLY_INVOICE', updatedInvoice.invoiceNumber, updatedInvoice as unknown as Record<string, unknown>);
+    void syncDocumentToFirebase('SUPPLY_INVOICE', updatedInvoice.id, updatedInvoice as any);
 
     if (addedTotal > 0) {
       setSuppliers(prev =>
@@ -7467,14 +7596,6 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setScanHistory(prev => [scanRecord, ...prev]);
 
-    void syncProductRecordToFirebase(finalProduct, true, {
-      branchId: activeBranch.id,
-      barcode: cleanBarcode,
-      scanType: params.scanUnitMode === 'BOTTLE' ? 'SINGLE_BOTTLE' : 'MASTER_CASE',
-      scannerUserId: currentUser.id,
-      scannerName: currentUser.name
-    });
-
     return {
       product: finalProduct,
       invoice: updatedInvoice,
@@ -7497,7 +7618,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       quoteNumber
     };
     setQuotes(prev => [newQuote, ...prev]);
-    void syncDocumentToFirebase('QUOTE', newQuote.quoteNumber, newQuote as unknown as Record<string, unknown>);
+    void syncDocumentToFirebase('QUOTE', newQuote.id, newQuote as any);
     return newQuote;
   };
 
@@ -7581,6 +7702,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setJournalEntries(prev => [newJE, ...prev]);
     setCommercialInvoices(prev => [newInvoice, ...prev]);
+    void syncDocumentToFirebase('COMMERCIAL_INVOICE', newInvoice.id, newInvoice as any);
 
     // Wire B2B Invoice into Chart of Accounts (Revenue 4010 & Output VAT 2020) and VAT Registry
     setChartOfAccounts(prev =>
@@ -7612,9 +7734,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       transmissionStatus: 'VERIFIED'
     };
     setEtimsInvoices(prev => [b2bEtims, ...prev]);
-
-    void syncDocumentToFirebase('COMMERCIAL_INVOICE', newInvoice.invoiceNumber, newInvoice as unknown as Record<string, unknown>);
-    void syncDocumentToFirebase('ETIMS', b2bEtims.invoiceNumber, b2bEtims as unknown as Record<string, unknown>);
+    void syncDocumentToFirebase('ETIMS', b2bEtims.id, b2bEtims as any);
 
     return newInvoice;
   };
@@ -7678,6 +7798,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setJournalEntries(prev => [newJE, ...prev]);
     setCommercialInvoices(prev => [newInvoice, ...prev]);
+    void syncDocumentToFirebase('COMMERCIAL_INVOICE', newInvoice.id, newInvoice as any);
 
     // Wire B2B Invoice into Chart of Accounts (Revenue 4010 & Output VAT 2020) and VAT Registry
     setChartOfAccounts(prev =>
@@ -7709,9 +7830,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       transmissionStatus: 'VERIFIED'
     };
     setEtimsInvoices(prev => [b2bEtims, ...prev]);
-
-    void syncDocumentToFirebase('COMMERCIAL_INVOICE', newInvoice.invoiceNumber, newInvoice as unknown as Record<string, unknown>);
-    void syncDocumentToFirebase('ETIMS', b2bEtims.invoiceNumber, b2bEtims as unknown as Record<string, unknown>);
+    void syncDocumentToFirebase('ETIMS', b2bEtims.id, b2bEtims as any);
 
     return newInvoice;
   };
@@ -9990,7 +10109,20 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         upsertLiveCustomerSession,
         removeLiveCustomerSession,
         persistenceErrorBanner,
-        clearPersistenceErrorBanner
+        clearPersistenceErrorBanner,
+        addFoodToCart,
+        attachedAlcoholBill,
+        setAttachedAlcoholBill,
+        restaurantTableNumber,
+        setRestaurantTableNumber,
+        restaurantFoodCategories,
+        restaurantFoodItems,
+        addRestaurantFoodItem,
+        updateRestaurantFoodItem,
+        deleteRestaurantFoodItem,
+        addRestaurantFoodCategory,
+        updateRestaurantFoodCategory,
+        deleteRestaurantFoodCategory
       }}
     >
       {persistenceErrorBanner && (
