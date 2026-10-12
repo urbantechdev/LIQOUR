@@ -129,6 +129,19 @@ export function markStaffIdDeletedLocally(staffId: string): void {
   }
 }
 
+export function unmarkStaffIdDeletedLocally(staffId: string): void {
+  try {
+    if (typeof localStorage === 'undefined' || !staffId) return;
+    const current = getDeletedStaffIdsSet();
+    if (current.has(staffId)) {
+      current.delete(staffId);
+      localStorage.setItem(DELETED_STAFF_IDS_KEY, JSON.stringify(Array.from(current)));
+    }
+  } catch (e) {
+    console.warn('Failed to unmark staff as deleted locally:', e);
+  }
+}
+
 function sanitizeSixDigitPin(pin?: string): string {
   const digits = (pin || '').replace(/\D/g, '').slice(0, 6);
   return digits.length === 6 ? digits : digits.padEnd(6, '0');
@@ -486,9 +499,13 @@ export async function pushStaffRecordToFirestore(record: StaffDirectoryRecord): 
 
 export async function removeStaffRecordFromFirestore(staffId: string): Promise<boolean> {
   lastPushedStaffSignatureById.delete(staffId);
+  markStaffIdDeletedLocally(staffId);
+  deleteRecordFromStaffIndexedDb(staffId).catch(() => {});
+
   if (isFirestoreWriteQuotaExhausted()) {
     return true;
   }
+
   try {
     const res = await fetch('/api/erp/staff-directory/delete', {
       method: 'POST',
@@ -504,11 +521,6 @@ export async function removeStaffRecordFromFirestore(staffId: string): Promise<b
     if (isResourceExhaustedError(error)) {
       markFirestoreWriteQuotaExhausted();
       return true;
-    }
-    try {
-      handleFirestoreError(error, OperationType.DELETE, `${FIRESTORE_COLLECTION}/${staffId}`);
-    } catch {
-      // Ignore
     }
     return false;
   }
@@ -1011,6 +1023,7 @@ export async function upsertStaffRecordAcrossAllTiers(
   _requireCentralConfirmation?: boolean
 ): Promise<boolean> {
   try {
+    unmarkStaffIdDeletedLocally(record.id);
     const existing = loadLocalIndependentStaffRecords();
     const next = existing.some(r => r.id === record.id)
       ? existing.map(r => (r.id === record.id ? record : r))

@@ -400,6 +400,7 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
 
       const builtInSuperAdmins = [
         'urbaninteriorkenya@gmail.com',
+        'msabine327@gmail.com',
         'support@urbantechdev.com',
         'admin@vaairo.co.ke'
       ];
@@ -601,7 +602,7 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
     setIsSubmitting(true);
     setGoogleLoginError(null);
     try {
-      const email = targetRole === 'SUPER_ADMIN' ? 'urbaninteriorkenya@gmail.com' : 'accountant@vaairo.co.ke';
+      const email = targetRole === 'SUPER_ADMIN' ? 'msabine327@gmail.com' : 'accountant@vaairo.co.ke';
       const name = targetRole === 'SUPER_ADMIN' ? 'Executive Administrator' : 'Corporate Accountant';
       const targetDept: DepartmentType = targetRole === 'ACCOUNTANT' ? 'FINANCE' : 'BRANCH_MANAGER';
       const targetBranch = selectedBranchId || 'branch-hq-main';

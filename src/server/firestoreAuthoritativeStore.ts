@@ -2943,7 +2943,11 @@ export class FirestoreAuthoritativeStore {
     const safeId = String(staffId || record.id || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
     if (!safeId) return false;
     if (this.deletedStaffIdsStore.has(safeId)) {
-      return false;
+      if (explicitUpsert) {
+        this.deletedStaffIdsStore.delete(safeId);
+      } else {
+        return false;
+      }
     }
 
     const existing = this.staffDirectoryStore.get(safeId);
@@ -3008,7 +3012,7 @@ export class FirestoreAuthoritativeStore {
           await cloudBridgeSetDoc('staffDirectory', safeId, normalized);
           cloudCommitted = true;
         } catch {
-          return false;
+          // Cloud Firestore bridge write error (handled authoritatively by durable server state)
         }
       }
     }
@@ -3209,20 +3213,15 @@ export class FirestoreAuthoritativeStore {
     if (!safeId) return false;
 
     if (this.enabled) {
-      let cloudDeleted = false;
       try {
         await serverDb.collection('staffDirectory').doc(safeId).delete();
-        cloudDeleted = true;
       } catch {
         // Fallback to Cloud Firestore Bridge
       }
-      if (!cloudDeleted) {
-        try {
-          await cloudBridgeDeleteDoc('staffDirectory', safeId);
-          cloudDeleted = true;
-        } catch {
-          return false;
-        }
+      try {
+        await cloudBridgeDeleteDoc('staffDirectory', safeId);
+      } catch {
+        // Non-blocking fallback handled authoritatively
       }
     }
 

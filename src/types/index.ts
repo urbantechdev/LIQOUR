@@ -497,6 +497,37 @@ export interface Employee {
   terminationReason?: string;
 }
 
+export type StaffDeductionType =
+  | 'STOCK_BREAKAGE'          // Bottle or carton breakages in warehouse/transit
+  | 'CASH_SHORTAGE'           // Till shortage or route driver cash shortage
+  | 'LATE_ABSENCE_PENALTY'    // Tardiness or unapproved absence fine
+  | 'SALARY_ADVANCE'          // Mid-month advance
+  | 'UNIFORM_EQUIPMENT'       // Uniform, ID card, or equipment damage
+  | 'COMPLIANCE_FINE'         // Regulatory or eTIMS policy fine
+  | 'OTHER_DEDUCTION';
+
+export interface StaffDeductionItem {
+  id: string;
+  payrollId?: string;
+  employeeId: string;
+  employeeName: string;
+  monthYear: string;
+  type: StaffDeductionType;
+  title: string;
+  amountKes: number;
+  incidentDate: string;
+  referenceDocNumber?: string;
+  reason: string;
+  isPenalty: boolean;
+  status: 'APPLIED' | 'RECONCILED' | 'WAIVED' | 'DISPUTED';
+  reconciledBy?: string;
+  reconciledAt?: string;
+  reconciliationNotes?: string;
+  recoveryAccountCode?: string;
+  journalEntryId?: string;
+  createdAt: string;
+}
+
 export interface PayrollRecord {
   id: string;
   monthYear: string; // e.g. "September 2026"
@@ -510,9 +541,13 @@ export interface PayrollRecord {
   nssfKes: number; // Tier I + II
   shifKes: number; // 2.75%
   housingLevyKes: number; // 1.5%
+  deductionsList?: StaffDeductionItem[];
+  totalDeductionsKes?: number;
+  totalPenaltiesKes?: number;
   netSalaryKes: number;
   paymentStatus: 'DRAFT' | 'PROCESSED' | 'SYNCED_TO_LEDGER';
   syncedJournalEntryId?: string;
+  reconciliationStatus?: 'PENDING_RECONCILIATION' | 'PARTIALLY_RECONCILED' | 'RECONCILED';
   processedAt: string;
 }
 
@@ -545,7 +580,16 @@ export interface JournalEntry {
   id: string;
   entryNumber: string;
   date: string;
-  referenceType: 'SALE_ETIMS' | 'PAYROLL_RUN' | 'MPESA_RECONCILIATION' | 'INVENTORY_PURCHASE' | 'MANUAL';
+  referenceType: 
+    | 'SALE_ETIMS' 
+    | 'PAYROLL_RUN' 
+    | 'MPESA_RECONCILIATION' 
+    | 'INVENTORY_PURCHASE' 
+    | 'STAFF_PENALTY_RECONCILIATION'
+    | 'ROUTE_CASHUP'
+    | 'EMPTIES_DEPOSIT'
+    | 'BREWERY_REBATE'
+    | 'MANUAL';
   referenceId: string;
   description: string;
   lines: JournalLine[];
@@ -554,6 +598,65 @@ export interface JournalEntry {
   postedBy: string;
   branchId?: string;
 }
+
+// Daily Route / Van Cash-Up Reconciliation Record
+export interface DailyRouteCashUpRecord {
+  id: string;
+  date: string;
+  routeCode: string; // e.g. "ROUTE-CBD-01", "ROUTE-WESTLANDS-02"
+  routeName: string;
+  vehicleReg: string; // e.g. "KDM 284P (Isuzu 3-Ton)"
+  driverName: string;
+  salesRepName: string;
+  invoicedValueKes: number;
+  cashCollectedKes: number;
+  mpesaCollectedKes: number;
+  chequesCollectedKes: number;
+  b2bCreditInvoicedKes: number;
+  breakagesValueKes: number;
+  varianceKes: number; // positive = surplus, negative = shortage
+  status: 'PENDING_COUNT' | 'SHORTAGE_FLAGGED' | 'BALANCED' | 'RECONCILED_TO_LEDGER';
+  emptiesReturnedCrates: number;
+  emptiesReturnedBottles: number;
+  reconciledBy?: string;
+  reconciledAt?: string;
+  journalEntryId?: string;
+  notes?: string;
+}
+
+// Returnable Glass & Crate (Empties) Deposit Record
+export interface EmptiesDepositRecord {
+  id: string;
+  date: string;
+  partnerType: 'BREWERY_SUPPLIER' | 'B2B_CUSTOMER';
+  partnerName: string; // e.g. "EABL / UDV", "The Alchemist Bar", "B-Club Nairobi"
+  crateType: 'BEER_CRATE_25BTL' | 'SPIRITS_CASE_12BTL' | 'KEG_BARREL_50L';
+  quantityCrates: number;
+  unitDepositRateKes: number; // e.g. 1200 per beer crate, 600 per crate shell
+  totalDepositKes: number;
+  movementType: 'DEPOSIT_PAID_OUT' | 'DEPOSIT_COLLECTED_IN' | 'RETURNS_SETTLED';
+  breakageCount: number;
+  status: 'OPEN' | 'RECONCILED';
+  reconciledBy?: string;
+  reconciledAt?: string;
+  notes?: string;
+}
+
+// Brewery / Supplier Rebate & Statement Claim Record
+export interface BreweryRebateClaimRecord {
+  id: string;
+  month: string;
+  supplierName: string; // "East African Breweries Ltd (EABL)", "Kenya Breweries Ltd"
+  targetTurnoverKes: number;
+  actualAchievedVolumeKes: number;
+  rebateRatePercent: number; // e.g. 2.5%
+  rebateAmountKes: number;
+  claimStatus: 'SUBMITTED' | 'CREDIT_NOTE_RECEIVED' | 'RECONCILED_IN_LEDGER';
+  creditNoteNumber?: string;
+  reconciledAt?: string;
+  reconciledBy?: string;
+}
+
 
 // Supplier & Vendor Management
 export type SupplierCategory = 'LOCAL_DISTILLERY' | 'IMPORT_AGENT' | 'BONDED_IMPORTER' | 'PACKAGING_LOGISTICS';

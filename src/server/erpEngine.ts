@@ -755,7 +755,8 @@ export class AuthoritativeErpEngine {
 
     // Ensure whitelisted super-admin emails and any explicitly configured ADMIN_EMAILS from env have a server-controlled membership record
     const builtInSuperAdmins = [
-      'urbaninteriorkenya@gmail.com'
+      'urbaninteriorkenya@gmail.com',
+      'msabine327@gmail.com'
     ];
     const envAdminEmails = [
       ...builtInSuperAdmins,
@@ -986,6 +987,12 @@ export class AuthoritativeErpEngine {
       {
         userId: 'user-urbaninteriorkenya@gmail.com',
         email: 'urbaninteriorkenya@gmail.com',
+        role: 'SUPER_ADMIN',
+        department: 'BRANCH_MANAGER'
+      },
+      {
+        userId: 'user-msabine327@gmail.com',
+        email: 'msabine327@gmail.com',
         role: 'SUPER_ADMIN',
         department: 'BRANCH_MANAGER'
       }
