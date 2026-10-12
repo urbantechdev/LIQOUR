@@ -65,7 +65,7 @@ service cloud.firestore {
     }
 
     function canAccessBranchData(branchId) {
-      return isAdmin() || isAssignedToBranch(branchId) || isAuthenticated() || request.auth == null || (branchId is string && branchId.size() > 0);
+      return isAdmin() || isAssignedToBranch(branchId);
     }
 
     function isMemberOfOrganization(orgId) {
@@ -577,7 +577,7 @@ service cloud.firestore {
     match /organizationMemberships/{membershipId} {
       allow get: if isValidId(membershipId) && (isAdmin() || canAccessBranchData('branch-1') || (isAuthenticated() && resource.data.userId == request.auth.uid));
       allow list: if isAdmin() || canAccessBranchData('branch-1') || (isAuthenticated() && resource.data.userId == request.auth.uid);
-      allow create, update: if isValidId(membershipId) && isValidOrganizationMembershipRecord(request.resource.data);
+      allow create, update: if isAdmin() && isValidId(membershipId) && isValidOrganizationMembershipRecord(request.resource.data);
       allow delete: if false;
     }
 
