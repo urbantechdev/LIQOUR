@@ -18,7 +18,7 @@ export type BranchTier =
   | 'WAREHOUSE' 
   | 'MAIN_STORE' 
   | 'DISTRIBUTOR' 
-  | 'SUPERMARKET' 
+  | 'SUPERMARKET'
   | 'LIQUOR_STORE';
 
 export type StockCategory = 'IPS' | 'LPS'; // Imported Products Stock vs Local Products Stock
@@ -237,8 +237,6 @@ export interface SaleOrder {
     | 'PENDING_RECONCILIATION'
     | 'RECONCILIATION_FAILED';
   idempotencyKey?: string;
-  mpesaReceiptNumber?: string;
-  createdAt: string;
   etimsInvoiceNumber: string;
   etimsQrPayload: string;
   etimsTransmitted: boolean;
@@ -248,6 +246,8 @@ export interface SaleOrder {
   assistedByStaffName?: string;
   checkoutLane?: string; // Checkout till lane (e.g. Lane 1 - Express, Lane 2, Lane 3)
   creditNoteNumber?: string; // Reversing credit note reference
+  creditNoteId?: string;
+  creditNoteIssued?: boolean;
   refundReason?: string; // Reason if refunded via credit note
   refundedAt?: string;
   refundedBy?: string;

@@ -183,7 +183,6 @@ export const BarcodeScannerModal: React.FC<Props> = ({
         sku: matched.sku,
         mode: 'POS_SELL'
       });
-
       if (onPosProductScanned) {
         onPosProductScanned(matched, qtyToAdd, clean);
       } else {

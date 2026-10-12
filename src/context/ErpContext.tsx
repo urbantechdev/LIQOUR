@@ -153,15 +153,17 @@ import {
   syncInventoryItemsToBranchLedgers,
   subscribeToBranchInventoryLedgers,
   seedInitialUnifiedStateSnapshot,
-  markRemoteUnifiedStateReceived
+  markRemoteUnifiedStateReceived,
+  syncProductRecordToFirebase,
+  syncProductsBatchToFirebase
 } from '../utils/unifiedErpDatabase';
-import { getAuthHeaders, setStoredSessionToken, getStoredSessionToken } from '../utils/apiAuth';
 import {
   syncUserToFirebase,
   syncProductCreatedToFirebase,
   syncProductScannedToFirebase,
   syncDocumentToFirebase
 } from '../utils/firebaseSyncEngine';
+import { getAuthHeaders, setStoredSessionToken, getStoredSessionToken } from '../utils/apiAuth';
 
 export interface CartItem {
   product: Product;
@@ -1111,7 +1113,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   }, [orders, websiteDeliveryOrders, setConsumers]);
 
-  // Real-time synchronization of active user profile to Firebase
+  // Automatically synchronize active user profile directly to Firebase Firestore users/{userId}
   useEffect(() => {
     if (currentUser && currentUser.id) {
       void syncUserToFirebase(currentUser);
@@ -4318,22 +4320,30 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // If accepted, update inventory on hand for active branch and move activated product to the top
     if (result.success && result.product && result.unpackedBottles) {
-      void syncProductScannedToFirebase(result.product, {
+      setProducts(prev => [
+        result.product!,
+        ...prev.filter(p => p.id !== result.product!.id)
+      ]);
+
+      void syncProductScannedToFirebase(result.product!, {
         branchId: activeBranchId,
         branchName: activeBranch.name,
         scanType: result.scanType || 'SINGLE_BOTTLE',
         barcode: rawBarcode,
-        sku: result.product.sku,
+        sku: result.product!.sku,
         scannerUserId: currentUser.id,
         scannerName: currentUser.name,
         bottlesCount: result.unpackedBottles,
         mode
       });
 
-      setProducts(prev => [
-        result.product!,
-        ...prev.filter(p => p.id !== result.product!.id)
-      ]);
+      void syncProductRecordToFirebase(result.product!, true, {
+        branchId: activeBranchId,
+        barcode: rawBarcode,
+        scanType: result.scanType,
+        scannerUserId: currentUser.id,
+        scannerName: currentUser.name
+      });
 
       setInventoryItems(prev => {
         const existingIdx = prev.findIndex(
@@ -4565,6 +4575,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setProducts(prev => [newProduct, ...prev]);
     void syncProductCreatedToFirebase(newProduct);
+    void syncProductRecordToFirebase(newProduct, false);
 
     const packSize = Math.max(1, prodData.packSize || 12);
     const initialBottles = Math.max(0, initialCases) * packSize;
@@ -4630,7 +4641,6 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setProducts(prev => prev.map(p => (p.id === productId ? updatedProduct : p)));
-    void syncProductCreatedToFirebase(updatedProduct);
 
     // Sync active POS cart if product is currently in cart
     setCart(prev =>
@@ -4706,6 +4716,9 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return prev;
     });
+
+    void syncProductCreatedToFirebase(updatedProduct);
+    void syncProductRecordToFirebase(updatedProduct, false);
 
     return updatedProduct;
   };
@@ -5891,9 +5904,9 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setOrders(prev => [newOrder, ...prev]);
     setEtimsInvoices(prev => [newInvoice, ...prev]);
-    void syncDocumentToFirebase('ORDER', newOrder.id, newOrder as any);
-    void syncDocumentToFirebase('ETIMS', newInvoice.id, newInvoice as any);
     setLastCompletedInvoice(newInvoice);
+    void syncDocumentToFirebase('ORDER', newOrder.orderNumber, newOrder as unknown as Record<string, unknown>);
+    void syncDocumentToFirebase('ETIMS', newInvoice.invoiceNumber, newInvoice as unknown as Record<string, unknown>);
     clearCart();
 
     logUserActivity({
@@ -6089,6 +6102,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setWebsiteDeliveryOrders(prev => [newWebOrder, ...prev]);
+    void syncDocumentToFirebase('ORDER', newWebOrder.orderNumber, newWebOrder as unknown as Record<string, unknown>);
 
     // Deduct ordered stock from the fulfilling branch and any linked invoice onboarding ledger
     const targetBranchIds = Array.from(new Set([fulfillingBranch.id, activeBranch.id]));
@@ -6815,9 +6829,10 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         currentUser.name || 'SUPPLY-INVOICE',
         true
       );
-      void syncDocumentToFirebase('SUPPLY_INVOICE', newInvoice.id, newInvoice as any);
       return nextInvoices;
     });
+
+    void syncDocumentToFirebase('SUPPLY_INVOICE', newInvoice.invoiceNumber, newInvoice as unknown as Record<string, unknown>);
 
     return newInvoice;
   };
@@ -6942,6 +6957,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setProducts(prev => [...createdProducts, ...prev]);
     createdProducts.forEach(p => void syncProductCreatedToFirebase(p));
+    void syncProductsBatchToFirebase(createdProducts);
     setInventoryItems(prev => [...newInventoryEntries, ...prev]);
 
     const addedSubtotal = addedInvoiceItems.reduce((s, i) => s + i.totalCostKes, 0);
@@ -6957,7 +6973,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setSupplyInvoices(prev => prev.map(inv => (inv.id === invoiceId ? updatedInvoice : inv)));
-    void syncDocumentToFirebase('SUPPLY_INVOICE', updatedInvoice.id, updatedInvoice as any);
+    void syncDocumentToFirebase('SUPPLY_INVOICE', updatedInvoice.invoiceNumber, updatedInvoice as unknown as Record<string, unknown>);
 
     if (addedTotal > 0) {
       setSuppliers(prev =>
@@ -7451,6 +7467,14 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setScanHistory(prev => [scanRecord, ...prev]);
 
+    void syncProductRecordToFirebase(finalProduct, true, {
+      branchId: activeBranch.id,
+      barcode: cleanBarcode,
+      scanType: params.scanUnitMode === 'BOTTLE' ? 'SINGLE_BOTTLE' : 'MASTER_CASE',
+      scannerUserId: currentUser.id,
+      scannerName: currentUser.name
+    });
+
     return {
       product: finalProduct,
       invoice: updatedInvoice,
@@ -7473,7 +7497,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       quoteNumber
     };
     setQuotes(prev => [newQuote, ...prev]);
-    void syncDocumentToFirebase('QUOTE', newQuote.id, newQuote as any);
+    void syncDocumentToFirebase('QUOTE', newQuote.quoteNumber, newQuote as unknown as Record<string, unknown>);
     return newQuote;
   };
 
@@ -7557,7 +7581,6 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setJournalEntries(prev => [newJE, ...prev]);
     setCommercialInvoices(prev => [newInvoice, ...prev]);
-    void syncDocumentToFirebase('COMMERCIAL_INVOICE', newInvoice.id, newInvoice as any);
 
     // Wire B2B Invoice into Chart of Accounts (Revenue 4010 & Output VAT 2020) and VAT Registry
     setChartOfAccounts(prev =>
@@ -7589,7 +7612,9 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       transmissionStatus: 'VERIFIED'
     };
     setEtimsInvoices(prev => [b2bEtims, ...prev]);
-    void syncDocumentToFirebase('ETIMS', b2bEtims.id, b2bEtims as any);
+
+    void syncDocumentToFirebase('COMMERCIAL_INVOICE', newInvoice.invoiceNumber, newInvoice as unknown as Record<string, unknown>);
+    void syncDocumentToFirebase('ETIMS', b2bEtims.invoiceNumber, b2bEtims as unknown as Record<string, unknown>);
 
     return newInvoice;
   };
@@ -7653,7 +7678,6 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setJournalEntries(prev => [newJE, ...prev]);
     setCommercialInvoices(prev => [newInvoice, ...prev]);
-    void syncDocumentToFirebase('COMMERCIAL_INVOICE', newInvoice.id, newInvoice as any);
 
     // Wire B2B Invoice into Chart of Accounts (Revenue 4010 & Output VAT 2020) and VAT Registry
     setChartOfAccounts(prev =>
@@ -7685,7 +7709,9 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       transmissionStatus: 'VERIFIED'
     };
     setEtimsInvoices(prev => [b2bEtims, ...prev]);
-    void syncDocumentToFirebase('ETIMS', b2bEtims.id, b2bEtims as any);
+
+    void syncDocumentToFirebase('COMMERCIAL_INVOICE', newInvoice.invoiceNumber, newInvoice as unknown as Record<string, unknown>);
+    void syncDocumentToFirebase('ETIMS', b2bEtims.invoiceNumber, b2bEtims as unknown as Record<string, unknown>);
 
     return newInvoice;
   };

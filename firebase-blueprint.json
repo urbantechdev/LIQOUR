@@ -625,58 +625,6 @@
     }
   },
   "firestore": {
-    "/users/{userId}": {
-      "schema": { "$ref": "#/entities/UserRecord" },
-      "description": "Stores synchronized authenticated user profiles and permissions."
-    },
-    "/products/{productId}": {
-      "schema": { "$ref": "#/entities/ProductRecord" },
-      "description": "Master products inventory catalog synchronized with universal barcodes."
-    },
-    "/productsPublic/{productId}": {
-      "schema": { "$ref": "#/entities/ProductRecord" },
-      "description": "Public storefront products catalog without commercial cost secrets."
-    },
-    "/productsPrivate/{productId}": {
-      "schema": { "$ref": "#/entities/ProductRecord" },
-      "description": "Private commercial pricing and margin catalog for enterprise operations."
-    },
-    "/scanHistory/{scanId}": {
-      "schema": { "$ref": "#/entities/ScanHistoryRecord" },
-      "description": "Chronological audit trail of physical barcode scans across registers and branches."
-    },
-    "/orders/{orderId}": {
-      "schema": { "$ref": "#/entities/SaleRecord" },
-      "description": "Authoritative POS and retail sales orders."
-    },
-    "/etimsInvoices/{docId}": {
-      "schema": { "$ref": "#/entities/FiscalTransactionRecord" },
-      "description": "Official Kenya Revenue Authority eTIMS fiscal invoices and signatures."
-    },
-    "/commercialInvoices/{docId}": {
-      "schema": { "$ref": "#/entities/DocumentRecord" },
-      "description": "B2B commercial invoices issued to distributors and commercial merchants."
-    },
-    "/supplyInvoices/{docId}": {
-      "schema": { "$ref": "#/entities/DocumentRecord" },
-      "description": "Inbound supply invoices and packing lists received from bonded suppliers."
-    },
-    "/commercialQuotes/{docId}": {
-      "schema": { "$ref": "#/entities/DocumentRecord" },
-      "description": "Commercial quotations and formal proforma invoices."
-    },
-    "/purchaseOrders/{docId}": {
-      "schema": { "$ref": "#/entities/DocumentRecord" },
-      "description": "Formal purchase orders issued to suppliers."
-    },
-    "/creditNotes/{docId}": {
-      "schema": { "$ref": "#/entities/DocumentRecord" },
-      "description": "Kenya eTIMS compliant credit notes, returns, and debit/credit adjustments issued by accountants."
-    },
-    "/documents/{docId}": {
-      "schema": { "$ref": "#/entities/DocumentRecord" },
-      "description": "General synchronized enterprise documentation store."
-    },
     "/userTotpFactors/{userId}": {
       "schema": { "$ref": "#/entities/UserTotpFactorRecord" },
       "description": "Stores server-controlled per-user TOTP MFA factor records."
@@ -756,6 +704,58 @@
     "/mpesaTransactions/{checkoutRequestId}": {
       "schema": { "$ref": "#/entities/MpesaTransactionRecord" },
       "description": "Stores authoritative Safaricom Daraja STK Push and C2B payment transactions with immutable callback records."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserRecord" },
+      "description": "Stores synchronized authenticated user profiles and permissions."
+    },
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/ProductRecord" },
+      "description": "Master products inventory catalog synchronized with universal barcodes."
+    },
+    "/productsPublic/{productId}": {
+      "schema": { "$ref": "#/entities/ProductRecord" },
+      "description": "Public storefront products catalog without commercial cost secrets."
+    },
+    "/productsPrivate/{productId}": {
+      "schema": { "$ref": "#/entities/ProductRecord" },
+      "description": "Private commercial pricing and margin catalog for enterprise operations."
+    },
+    "/scanHistory/{scanId}": {
+      "schema": { "$ref": "#/entities/ScanHistoryRecord" },
+      "description": "Chronological audit trail of physical barcode scans across registers and branches."
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/SaleRecord" },
+      "description": "Authoritative POS and retail sales orders."
+    },
+    "/etimsInvoices/{docId}": {
+      "schema": { "$ref": "#/entities/FiscalTransactionRecord" },
+      "description": "Official Kenya Revenue Authority eTIMS fiscal invoices and signatures."
+    },
+    "/commercialInvoices/{docId}": {
+      "schema": { "$ref": "#/entities/DocumentRecord" },
+      "description": "B2B commercial invoices issued to distributors and commercial merchants."
+    },
+    "/supplyInvoices/{docId}": {
+      "schema": { "$ref": "#/entities/DocumentRecord" },
+      "description": "Inbound supply invoices and packing lists received from bonded suppliers."
+    },
+    "/commercialQuotes/{docId}": {
+      "schema": { "$ref": "#/entities/DocumentRecord" },
+      "description": "Commercial quotations and formal proforma invoices."
+    },
+    "/purchaseOrders/{docId}": {
+      "schema": { "$ref": "#/entities/DocumentRecord" },
+      "description": "Formal purchase orders issued to suppliers."
+    },
+    "/creditNotes/{docId}": {
+      "schema": { "$ref": "#/entities/DocumentRecord" },
+      "description": "Kenya eTIMS compliant credit notes, returns, and debit/credit adjustments issued by accountants."
+    },
+    "/documents/{docId}": {
+      "schema": { "$ref": "#/entities/DocumentRecord" },
+      "description": "General synchronized enterprise documentation store."
     }
   }
 }

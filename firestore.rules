@@ -597,20 +597,20 @@ service cloud.firestore {
     // Public Storefront Catalogue (`productsPublic/{productId}`): excludes wholesale/cost/provenance secrets
     match /productsPublic/{productId} {
       allow get, list: if true;
-      allow create, update, delete: if false; // Synchronized exclusively via VAAIRO Server API -> Admin SDK
+      allow create, update, delete: if isAdmin();
     }
 
     // Private Commercial Pricing & Margin Catalogue (`productsPrivate/{productId}`): restricted to Organization Members & Admins
     match /productsPrivate/{productId} {
       allow get: if isValidId(productId) && (isAdmin() || isMemberOfOrganization(resource.data.organizationId));
       allow list: if isAdmin() || isMemberOfOrganization(resource.data.organizationId);
-      allow create, update, delete: if false; // Synchronized exclusively via VAAIRO Server API -> Admin SDK
+      allow create, update, delete: if isAdmin();
     }
 
     match /products/{productId} {
       allow get: if isValidId(productId) && (isAdmin() || isMemberOfOrganization(resource.data.organizationId));
       allow list: if isAdmin() || isMemberOfOrganization(resource.data.organizationId);
-      allow create, update, delete: if false; // Synchronized exclusively via VAAIRO Server API -> Admin SDK
+      allow create, update, delete: if isAdmin();
     }
 
     match /stockReservations/{reservationId} {
@@ -658,65 +658,6 @@ service cloud.firestore {
     }
 
     // -------------------------------------------------------------------------
-    // 8B. AUDIT SCAN HISTORY & ENTERPRISE DOCUMENTS
-    // -------------------------------------------------------------------------
-    match /scanHistory/{scanId} {
-      allow get: if isValidId(scanId) && (isAdmin() || isAuthenticated());
-      allow list: if isAdmin() || isAuthenticated();
-      allow create: if isValidId(scanId) && (isAdmin() || isAuthenticated());
-      allow update, delete: if isAdmin() && isValidId(scanId);
-    }
-
-    match /etimsInvoices/{docId} {
-      allow get: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
-      allow list: if isAdmin() || isAccountant() || isAuthenticated();
-      allow create, update: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
-      allow delete: if isAdmin() && isValidId(docId);
-    }
-
-    match /commercialInvoices/{docId} {
-      allow get: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
-      allow list: if isAdmin() || isAccountant() || isAuthenticated();
-      allow create, update: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
-      allow delete: if isAdmin() && isValidId(docId);
-    }
-
-    match /supplyInvoices/{docId} {
-      allow get: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
-      allow list: if isAdmin() || isAccountant() || isAuthenticated();
-      allow create, update: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
-      allow delete: if isAdmin() && isValidId(docId);
-    }
-
-    match /commercialQuotes/{docId} {
-      allow get: if isValidId(docId) && (isAdmin() || isAuthenticated());
-      allow list: if isAdmin() || isAuthenticated();
-      allow create, update: if isValidId(docId) && (isAdmin() || isAuthenticated());
-      allow delete: if isAdmin() && isValidId(docId);
-    }
-
-    match /purchaseOrders/{docId} {
-      allow get: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
-      allow list: if isAdmin() || isAccountant() || isAuthenticated();
-      allow create, update: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
-      allow delete: if isAdmin() && isValidId(docId);
-    }
-
-    match /creditNotes/{docId} {
-      allow get: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
-      allow list: if isAdmin() || isAccountant() || isAuthenticated();
-      allow create, update: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
-      allow delete: if isAdmin() && isValidId(docId);
-    }
-
-    match /documents/{docId} {
-      allow get: if isValidId(docId) && (isAdmin() || isAuthenticated());
-      allow list: if isAdmin() || isAuthenticated();
-      allow create, update: if isValidId(docId) && (isAdmin() || isAuthenticated());
-      allow delete: if isAdmin() && isValidId(docId);
-    }
-
-    // -------------------------------------------------------------------------
     // 9. PERSISTENT TRANSACTION IDEMPOTENCY KEYS (idempotencyKeys/{scope}_{key})
     // -------------------------------------------------------------------------
     match /idempotencyKeys/{idempotencyId} {
@@ -740,6 +681,55 @@ service cloud.firestore {
     // -------------------------------------------------------------------------
     match /userTotpFactors/{userId} {
       allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // 12. REAL-TIME BUSINESS DOCUMENTS & AUDIT RECORDS
+    // -------------------------------------------------------------------------
+    match /etimsInvoices/{invoiceId} {
+      allow get, list: if isAdmin() || isAccountant();
+      allow create, update: if isAdmin() || isAccountant();
+      allow delete: if false;
+    }
+
+    match /commercialQuotes/{quoteId} {
+      allow get, list: if isAdmin() || canAccessOrganizationData(resource.data.organizationId, resource.data.branchId);
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /commercialInvoices/{invoiceId} {
+      allow get, list: if isAdmin() || isAccountant();
+      allow create, update, delete: if isAdmin() || isAccountant();
+    }
+
+    match /supplyInvoices/{invoiceId} {
+      allow get, list: if isAdmin() || isAccountant();
+      allow create, update, delete: if isAdmin() || isAccountant();
+    }
+
+    match /purchaseOrders/{orderId} {
+      allow get, list: if isAdmin() || isAccountant();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /scanHistory/{scanId} {
+      allow get, list: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidId(scanId);
+      allow update, delete: if false;
+    }
+
+    match /creditNotes/{docId} {
+      allow get: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
+      allow list: if isAdmin() || isAccountant() || isAuthenticated();
+      allow create, update: if isValidId(docId) && (isAdmin() || isAccountant() || isAuthenticated());
+      allow delete: if isAdmin() && isValidId(docId);
+    }
+
+    match /documents/{docId} {
+      allow get: if isValidId(docId) && (isAdmin() || isAuthenticated());
+      allow list: if isAdmin() || isAuthenticated();
+      allow create, update: if isValidId(docId) && (isAdmin() || isAuthenticated());
+      allow delete: if isAdmin() && isValidId(docId);
     }
   }
 }

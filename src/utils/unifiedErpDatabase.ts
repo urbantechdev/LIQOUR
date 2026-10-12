@@ -269,6 +269,118 @@ export async function pushUnifiedErpStateToFirestore<T>(
 }
 
 /**
+ * Synchronizes a user profile record directly to Firebase Firestore users/{userId}
+ * via the server authoritative pipeline.
+ */
+export async function syncUserToFirebase(user: {
+  id?: string;
+  name?: string;
+  email?: string;
+  role?: string;
+  department?: string;
+  branchId?: string;
+  organizationId?: string;
+  phone?: string;
+  mfaEnabled?: boolean;
+}): Promise<boolean> {
+  try {
+    const res = await fetch('/api/users/sync', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify(user)
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Synchronizes an individual product record directly to Firebase Firestore
+ * (/products/{id}, /productsPublic/{id}, /productsPrivate/{id}, and /scanHistory)
+ * when created, edited, or scanned via barcode intake or POS counter.
+ */
+export async function syncProductRecordToFirebase(
+  product: Product,
+  isScan = false,
+  scanMetadata?: {
+    branchId?: string;
+    scanType?: string;
+    scannerUserId?: string;
+    scannerName?: string;
+    barcode?: string;
+  }
+): Promise<boolean> {
+  try {
+    const res = await fetch('/api/products/sync-record', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({
+        product,
+        isScan,
+        scanMetadata
+      })
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Synchronizes a batch of products to Firebase Firestore.
+ */
+export async function syncProductsBatchToFirebase(products: Product[]): Promise<boolean> {
+  try {
+    const res = await fetch('/api/products/sync-batch', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({ products })
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Synchronizes any operational business document (Orders, Invoices, Delivery Orders,
+ * Stock Transfers, Quotes, Audit Sessions) to its respective Firebase Firestore collection.
+ */
+export async function syncDocumentToFirebase(
+  documentType: 'ORDER' | 'ETIMS' | 'COMMERCIAL_INVOICE' | 'SUPPLY_INVOICE' | 'QUOTE' | 'STOCK_TRANSFER' | 'PURCHASE_ORDER' | 'STOCK_AUDIT',
+  documentId: string,
+  payload: Record<string, unknown>
+): Promise<boolean> {
+  try {
+    const res = await fetch('/api/documents/sync', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({
+        documentType,
+        documentId,
+        payload
+      })
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Subscribe to unified ERP state slices across PC & Mobile via VAAIRO Server SSE + Firestore
  * with automatic re-synchronization on connection, visibility change, and Firebase Auth state changes.
  */

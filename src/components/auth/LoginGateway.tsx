@@ -34,7 +34,6 @@ import {
 } from 'lucide-react';
 import { formatKes } from '../../utils/kenyaTax';
 import { setStoredSessionToken } from '../../utils/apiAuth';
-import { syncUserToFirebase } from '../../utils/firebaseSyncEngine';
 import {
   CenterScreenFeedback,
   CenterScreenFeedbackData
@@ -1365,7 +1364,7 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
                   </div>
                   <div className="flex items-center justify-between gap-2">
                     <code className="text-xs font-mono text-amber-300 font-bold break-all select-all">
-                      {typeof window !== 'undefined' ? window.location.hostname : 'ais-dev-fw67cxsd76zbrxp46vciwx-668230074633.europe-west2.run.app'}
+                      {typeof window !== 'undefined' ? window.location.hostname : 'ais-dev-lxkly7ln76wptybm7utbhy-639713775043.europe-west2.run.app'}
                     </code>
                     <button
                       type="button"
@@ -1411,10 +1410,10 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
                       Scroll down to <strong>Authorized domains</strong> and click <strong>Add domain</strong>
                     </li>
                     <li>
-                      Paste <code className="px-1 py-0.5 bg-slate-100 rounded text-slate-900 font-mono font-bold">{typeof window !== 'undefined' ? window.location.hostname : 'ais-dev-fw67cxsd76zbrxp46vciwx-668230074633.europe-west2.run.app'}</code> and save
+                      Paste <code className="px-1 py-0.5 bg-slate-100 rounded text-slate-900 font-mono font-bold">{typeof window !== 'undefined' ? window.location.hostname : 'ais-dev-gcgwm7li67laheg33xkccf-792792559351.europe-west2.run.app'}</code> and save
                     </li>
                     <li className="text-slate-500">
-                      (Also add <code className="px-1 py-0.5 bg-slate-100 rounded text-slate-700 font-mono text-[10px]">ais-pre-fw67cxsd76zbrxp46vciwx-668230074633.europe-west2.run.app</code> for shared previews)
+                      (Also add <code className="px-1 py-0.5 bg-slate-100 rounded text-slate-700 font-mono text-[10px]">ais-pre-gcgwm7li67laheg33xkccf-792792559351.europe-west2.run.app</code> for shared previews)
                     </li>
                   </ol>
                 </div>
