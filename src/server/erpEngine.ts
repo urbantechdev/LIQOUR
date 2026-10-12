@@ -54,6 +54,12 @@ const FORBIDDEN_DEFAULT_SECRETS = new Set([
   'secret'
 ]);
 
+// SECURITY: seeded accounts without an explicit PIN get an unguessable random PIN (never a shared '000000').
+// Admins must set/reset the PIN via /api/auth/register-staff-pin before that account can sign in.
+function randomSixDigitPin(): string {
+  return String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+}
+
 const DEV_SECRETS_FILE = path.resolve(process.cwd(), '.erp-dev-secrets.json');
 
 function loadOrCreateDurableDevSecrets(): {
@@ -933,7 +939,7 @@ export class AuthoritativeErpEngine {
           : 'STAFF') as ExtendedErpRole,
         department: emp.department,
         branchId: emp.branchId || 'branch-1',
-        defaultPin: String(emp.loginPin || '000000').replace(/\D/g, '').padEnd(6, '0').slice(0, 6)
+        defaultPin: String(emp.loginPin || '').replace(/\D/g, '').length >= 6 ? String(emp.loginPin).replace(/\D/g, '').slice(0, 6) : randomSixDigitPin()
       })),
       ...INITIAL_AFFILIATES.map(aff => ({
         staffId: aff.id,
@@ -942,7 +948,7 @@ export class AuthoritativeErpEngine {
         role: 'STAFF' as ExtendedErpRole,
         department: 'AFFILIATES' as DepartmentType,
         branchId: aff.branchId || 'branch-1',
-        defaultPin: String(aff.loginPin || '000000').replace(/\D/g, '').padEnd(6, '0').slice(0, 6)
+        defaultPin: String(aff.loginPin || '').replace(/\D/g, '').length >= 6 ? String(aff.loginPin).replace(/\D/g, '').slice(0, 6) : randomSixDigitPin()
       }))
     ];
 

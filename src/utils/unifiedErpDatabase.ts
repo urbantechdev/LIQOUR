@@ -21,7 +21,7 @@ import {
   splitProductIntoPublicAndPrivate,
   stripCommercialPricingFromPublicProduct
 } from './productCatalogSplit';
-import { getAuthHeaders } from './apiAuth';
+import { getAuthHeaders, getStoredSessionToken } from './apiAuth';
 
 export const UNIFIED_ERP_COLLECTION = 'erpUnifiedState';
 export const PUBLIC_PRODUCTS_COLLECTION = 'productsPublic';
@@ -242,7 +242,8 @@ export async function pushUnifiedErpStateToFirestore<T>(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-vaairo-terminal-sync': '1'
+        'x-vaairo-terminal-sync': '1',
+        ...getAuthHeaders()
       },
       body: JSON.stringify({
         docs: [docPayload]
@@ -474,7 +475,7 @@ export function subscribeToUnifiedErpDatabase(
   const pullUnifiedStateFromServer = async () => {
     if (isDisposed) return;
     try {
-      const res = await fetch('/api/erp/unified-state');
+      const res = await fetch('/api/erp/unified-state', { headers: { ...getAuthHeaders() } });
       if (!res.ok || isDisposed) return;
       const data = await res.json().catch(() => ({}));
       const docs = Array.isArray(data?.docs) ? (data.docs as Array<Record<string, unknown>>) : [];
@@ -527,7 +528,7 @@ export function subscribeToUnifiedErpDatabase(
   let eventSource: EventSource | null = null;
   if (typeof window !== 'undefined' && typeof window.EventSource !== 'undefined') {
     try {
-      eventSource = new EventSource('/api/erp/live-stream');
+      eventSource = new EventSource(`/api/erp/live-stream?token=${encodeURIComponent(getStoredSessionToken())}`);
       eventSource.addEventListener('INITIAL_SNAPSHOT', (evt: MessageEvent) => {
         if (isDisposed) return;
         try {

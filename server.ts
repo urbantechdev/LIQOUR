@@ -296,9 +296,12 @@ async function startServer() {
   }
 
   function getClientIp(req: Request): string {
+    // SECURITY: X-Forwarded-For is attacker-controlled unless a trusted proxy sets it.
+    // Set TRUST_PROXY=1 only when deployed behind Cloudflare/Vercel/Cloud Run.
     const forwarded = req.headers['x-forwarded-for'];
-    if (typeof forwarded === 'string') {
-      return forwarded.split(',')[0].trim();
+    if (process.env.TRUST_PROXY === '1' && typeof forwarded === 'string') {
+      const parts = forwarded.split(',').map(p => p.trim()).filter(Boolean);
+      return parts[parts.length - 1] || req.socket.remoteAddress || '127.0.0.1';
     }
     return req.socket.remoteAddress || '127.0.0.1';
   }
@@ -513,78 +516,24 @@ async function startServer() {
 
   // 1a. Active ERP Terminal Session Token Hydration (ensures PC & Mobile terminals whose local auth state survived a server restart or Google OAuth client fallback receive a valid signed session token)
   app.post('/api/auth/terminal-session', (req: Request, res: Response) => {
-    const { userId, name, email, role, department, branchId, organizationId } = req.body || {};
-    const cleanEmail = String(email || '').trim().toLowerCase();
-    const targetDept: DepartmentType = (department as DepartmentType) || 'BRANCH_MANAGER';
-    const targetOrg = String(organizationId || 'org-merchant-vaairo-hq');
-
-    const builtInSuperAdmins = [
-      'urbaninteriorkenya@gmail.com',
-      ...(process.env.ADMIN_EMAILS || '')
-        .split(',')
-        .map(e => e.trim().toLowerCase())
-        .filter(Boolean)
-    ];
-
-    let resolvedRole: ExtendedErpRole = 'STAFF';
-    if (role === 'SUPER_ADMIN' || role === 'ADMIN') {
-      const existingMem = erpEngine.organizationMemberships.get(`${String(userId || '')}_${targetOrg}`);
-      if (
-        (cleanEmail && builtInSuperAdmins.includes(cleanEmail)) ||
-        (existingMem && existingMem.active && (existingMem.role === 'SUPER_ADMIN' || existingMem.role === 'ADMIN'))
-      ) {
-        resolvedRole = 'SUPER_ADMIN';
-      } else {
-        resolvedRole = 'STAFF';
-      }
-    } else if (role === 'ACCOUNTANT') {
-      resolvedRole = 'ACCOUNTANT';
-    } else if (role === 'MANAGER' || targetDept === 'BRANCH_MANAGER') {
-      resolvedRole = 'MANAGER';
-    } else if (targetDept === 'POS') {
-      resolvedRole = 'CASHIER';
-    } else if (targetDept === 'INVENTORY') {
-      resolvedRole = 'INVENTORY_STAFF';
-    } else if (targetDept === 'PROCUREMENT') {
-      resolvedRole = 'PROCUREMENT_STAFF';
+    // SECURITY: This endpoint ONLY refreshes an already-verified session. Roles, departments and
+    // branches are taken from the signed session token and NEVER from the request body, so it
+    // cannot be used to mint SUPER_ADMIN/ADMIN/ACCOUNTANT/MANAGER tokens anonymously.
+    // Initial sign-in must go through /api/auth/login-pin, /api/auth/google-login or
+    // /api/auth/verify-google-mfa, which verify credentials server-side.
+    const authHeader = req.headers['authorization'];
+    const bearer = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    const existing = bearer ? verifySessionToken(bearer) : null;
+    if (!existing) {
+      return res.status(401).json({
+        error: 'Authentication required: sign in with your PIN or Google account to start a session.'
+      });
     }
-
-    const resolvedUserId = String(userId || (cleanEmail ? `user-${cleanEmail}` : `term-${Date.now()}`));
-
-    erpEngine.registerOrganizationMembership({
-      userId: resolvedUserId,
-      email: cleanEmail || undefined,
-      organizationId: targetOrg,
-      role: resolvedRole,
-      department: targetDept,
-      branchId: branchId ? String(branchId) : undefined,
-      active: true
-    });
-
-    const sessionUser: SessionUser = {
-      userId: resolvedUserId,
-      name: String(name || 'ERP Terminal User'),
-      email: cleanEmail || undefined,
-      role: resolvedRole,
-      department: targetDept,
-      branchId: branchId ? String(branchId) : undefined,
-      organizationId: targetOrg
-    };
-    const token = createSessionToken(sessionUser);
-    void firestoreAuthoritativeStore.persistUserRecordToFirestore(resolvedUserId, {
-      id: resolvedUserId,
-      name: sessionUser.name,
-      email: cleanEmail,
-      role: resolvedRole,
-      department: targetDept,
-      branchId: sessionUser.branchId,
-      organizationId: targetOrg,
-      lastLoginAt: new Date().toISOString()
-    });
+    const token = createSessionToken(existing);
     return res.status(200).json({
       success: true,
       token,
-      user: sessionUser
+      user: existing
     });
   });
 
@@ -775,6 +724,11 @@ async function startServer() {
       userAgent: req.headers['user-agent']
     });
 
+    void firestoreAuthoritativeStore.persistUserRecordToFirestore(session.userId, {
+      ...session,
+      lastLoginAt: new Date().toISOString()
+    });
+
     return res.status(200).json({
       success: true,
       mfaRequired: false,
@@ -784,10 +738,6 @@ async function startServer() {
         ...session,
         permissions: membership.permissions
       }
-    });
-    void firestoreAuthoritativeStore.persistUserRecordToFirestore(session.userId, {
-      ...session,
-      lastLoginAt: new Date().toISOString()
     });
   });
 
@@ -885,31 +835,22 @@ async function startServer() {
     const authHeader = req.headers['authorization'];
     const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
     const session = token ? verifySessionToken(token) : null;
-    const queryEmail = typeof req.query.email === 'string' ? req.query.email.trim().toLowerCase() : undefined;
-    const bodyEmail =
-      req.body && typeof req.body.accountEmail === 'string'
-        ? req.body.accountEmail.trim().toLowerCase()
-        : req.body && typeof req.body.email === 'string'
-        ? req.body.email.trim().toLowerCase()
-        : undefined;
-    const email = session?.email || bodyEmail || queryEmail;
-    const userId =
-      session?.userId ||
-      (req.body && typeof req.body.userId === 'string' ? req.body.userId.trim() : undefined) ||
-      (email ? `user-${email}` : undefined);
+    // SECURITY: unauthenticated callers get NO identity (body/query values are untrusted).
+    const email = session ? session.email : undefined;
+    const userId = session ? session.userId : undefined;
     return {
       authenticated: Boolean(session),
       role: session?.role,
       department: session?.department,
       userId,
       email,
-      name: session?.name || (req.body && typeof req.body.name === 'string' ? req.body.name : undefined),
-      branchId: session?.branchId || (req.body && typeof req.body.branchId === 'string' ? req.body.branchId : undefined),
-      organizationId: session?.organizationId || (req.body && typeof req.body.organizationId === 'string' ? req.body.organizationId : undefined)
+      name: session?.name,
+      branchId: session?.branchId,
+      organizationId: session?.organizationId
     };
   }
 
-  app.get('/api/auth/totp/status', (req: Request, res: Response) => {
+  app.get('/api/auth/totp/status', authenticateSession, (req: Request, res: Response) => {
     const caller = resolveOptionalCallerIdentity(req);
     const status = erpEngine.resolveUserTotpStatus({
       userId: caller.userId,
@@ -925,10 +866,13 @@ async function startServer() {
     });
   });
 
-  app.post('/api/auth/totp/setup-init', (req: Request, res: Response) => {
+  app.post('/api/auth/totp/setup-init', authenticateSession, (req: Request, res: Response) => {
     const { customSecret, accountEmail } = req.body || {};
     const caller = resolveOptionalCallerIdentity(req);
-    const targetEmail = String(accountEmail || caller.email || 'admin@vaairo.co.ke').trim().toLowerCase();
+    const targetEmail = String(caller.email || '').trim().toLowerCase();
+    if (!targetEmail) {
+      return res.status(403).json({ error: 'TOTP enrollment requires a session bound to an account email.' });
+    }
     const enrollment = erpEngine.enrollOrInitUserTotpFactor({
       userId: caller.userId,
       email: targetEmail,
@@ -944,10 +888,13 @@ async function startServer() {
     });
   });
 
-  app.post('/api/auth/totp/setup-verify', (req: Request, res: Response) => {
+  app.post('/api/auth/totp/setup-verify', authenticateSession, (req: Request, res: Response) => {
     const { totpCode, secret, accountEmail, factorType, firebaseFactorUid } = req.body || {};
     const caller = resolveOptionalCallerIdentity(req);
-    const targetEmail = String(accountEmail || caller.email || 'admin@vaairo.co.ke').trim().toLowerCase();
+    const targetEmail = String(caller.email || '').trim().toLowerCase();
+    if (!targetEmail) {
+      return res.status(403).json({ error: 'TOTP enrollment requires a session bound to an account email.' });
+    }
 
     const confirmRes = erpEngine.confirmUserTotpEnrollment({
       userId: caller.userId,
@@ -966,7 +913,6 @@ async function startServer() {
       });
     }
 
-    activeTotpSecret = confirmRes.factor?.totpSecret || activeTotpSecret;
     pendingTotpEnrollmentSecret = null;
 
     return res.status(200).json({
@@ -979,17 +925,16 @@ async function startServer() {
     });
   });
 
-  app.post('/api/auth/totp/disable', (req: Request, res: Response) => {
+  app.post('/api/auth/totp/disable', authenticateSession, (req: Request, res: Response) => {
     const caller = resolveOptionalCallerIdentity(req);
+    if (!caller.email) {
+      return res.status(403).json({ error: 'TOTP changes require a session bound to an account email.' });
+    }
     erpEngine.disableUserTotpFactor({
       userId: caller.userId,
-      email: caller.email || 'admin@vaairo.co.ke',
+      email: caller.email,
       ipAddress: getClientIp(req)
     });
-    if (!caller.email) {
-      activeTotpSecret = null;
-      pendingTotpEnrollmentSecret = null;
-    }
     return res.status(200).json({
       success: true,
       enabled: false,
@@ -1692,7 +1637,7 @@ async function startServer() {
     return res.json({ success: true });
   });
 
-  app.get('/api/customers/live-sessions', (_req: Request, res: Response) => {
+  app.get('/api/customers/live-sessions', authenticateSession, (_req: Request, res: Response) => {
     const customers = Array.from(liveLoggedInCustomerStore.values()).sort((a, b) =>
       String(b.lastActiveAt || '').localeCompare(String(a.lastActiveAt || ''))
     );
@@ -1873,14 +1818,19 @@ async function startServer() {
   })();
 
   // Authoritative Cross-Device Staff Directory, Unified ERP State & Real-Time SSE Stream
-  app.get('/api/erp/staff-directory', async (_req: Request, res: Response) => {
+  app.get('/api/erp/staff-directory', authenticateSession, async (_req: Request, res: Response) => {
     const records = await firestoreAuthoritativeStore.getStaffDirectoryRecordsAuthoritative();
     for (const rec of records) {
       syncStaffDirectoryRecordIntoPinRegistry(rec);
     }
+    // SECURITY: never return PIN hashes, salts or plaintext PINs to the browser.
+    const safeRecords = records.map(rec => {
+      const { pinHash, pinSalt, loginPin, rawPin, ...rest } = rec as Record<string, unknown>;
+      return rest;
+    });
     return res.status(200).json({
       success: true,
-      records
+      records: safeRecords
     });
   });
 
@@ -1935,6 +1885,16 @@ async function startServer() {
     const caller = resolveOptionalCallerIdentity(req);
     if (!caller.authenticated) {
       return res.status(401).json({ error: 'Unauthorized: Valid management session token required.' });
+    }
+    if (
+      caller.role !== 'SUPER_ADMIN' &&
+      caller.role !== 'ADMIN' &&
+      caller.role !== 'MANAGER' &&
+      caller.department !== 'HR_PAYROLL' &&
+      caller.department !== 'BRANCH_MANAGER' &&
+      caller.department !== 'SALES_MANAGER'
+    ) {
+      return res.status(403).json({ error: 'Forbidden: Management privileges required to bulk-sync staff records.' });
     }
     const incoming = Array.isArray(req.body?.records) ? req.body.records : [];
     for (const item of incoming) {
@@ -1996,7 +1956,7 @@ async function startServer() {
   });
 
   // Authoritative Unified ERP State Sync (PC <-> Server <-> Firestore <-> Mobile)
-  app.get('/api/erp/unified-state', async (_req: Request, res: Response) => {
+  app.get('/api/erp/unified-state', authenticateSession, async (_req: Request, res: Response) => {
     const docs = await firestoreAuthoritativeStore.getUnifiedStateDocsAuthoritative();
     return res.status(200).json({
       success: true,
@@ -2004,7 +1964,7 @@ async function startServer() {
     });
   });
 
-  app.post('/api/erp/unified-state/sync', async (req: Request, res: Response) => {
+  app.post('/api/erp/unified-state/sync', authenticateSession, async (req: Request, res: Response) => {
     const docs = Array.isArray(req.body?.docs) ? req.body.docs : [];
     const result = await firestoreAuthoritativeStore.persistUnifiedStateDocsToFirestore(
       docs as Array<Record<string, unknown>>
@@ -2053,19 +2013,20 @@ async function startServer() {
   // ===========================================================================
   // REAL-TIME FIREBASE SYNCHRONIZATION: USERS, PRODUCTS (SCANNED/CREATED) & DOCUMENTS
   // ===========================================================================
-  app.post('/api/users/sync', async (req: Request, res: Response) => {
+  app.post('/api/users/sync', authenticateSession, async (req: Request, res: Response) => {
     const caller = resolveOptionalCallerIdentity(req);
-    const { userId, name, email, role, department, branchId, organizationId, phone, mfaEnabled } = req.body || {};
-    const targetUserId = String(userId || caller.userId || (email ? `user-${email}` : `user-${Date.now()}`));
+    const { name, phone, mfaEnabled } = req.body || {};
+    // SECURITY: a user may only sync THEIR OWN record; role/department/branch/org come from the signed session.
+    const targetUserId = String(caller.userId);
 
     const userDoc: Record<string, unknown> = {
       id: targetUserId,
       name: String(name || caller.name || 'System User'),
-      email: String(email || caller.email || '').trim().toLowerCase(),
-      role: String(role || caller.role || 'STAFF'),
-      department: String(department || caller.department || 'BRANCH_MANAGER'),
-      branchId: String(branchId || caller.branchId || 'branch-hq-main'),
-      organizationId: String(organizationId || caller.organizationId || 'org-merchant-vaairo-hq'),
+      email: String(caller.email || '').trim().toLowerCase(),
+      role: String(caller.role || 'STAFF'),
+      department: String(caller.department || 'BRANCH_MANAGER'),
+      branchId: String(caller.branchId || 'branch-hq-main'),
+      organizationId: String(caller.organizationId || 'org-merchant-vaairo-hq'),
       phone: phone ? String(phone) : '',
       mfaEnabled: typeof mfaEnabled === 'boolean' ? mfaEnabled : false,
       lastLoginAt: new Date().toISOString(),
@@ -2076,7 +2037,7 @@ async function startServer() {
     return res.status(200).json({ success: ok, user: userDoc });
   });
 
-  app.post('/api/products/sync-record', async (req: Request, res: Response) => {
+  app.post('/api/products/sync-record', authenticateSession, async (req: Request, res: Response) => {
     const caller = resolveOptionalCallerIdentity(req);
     const { product, isScan, scanMetadata } = req.body || {};
     if (!product || typeof product !== 'object' || !product.id) {
@@ -2131,7 +2092,7 @@ async function startServer() {
     });
   });
 
-  app.post('/api/products/sync-batch', async (req: Request, res: Response) => {
+  app.post('/api/products/sync-batch', authenticateSession, async (req: Request, res: Response) => {
     const { products } = req.body || {};
     const items = Array.isArray(products) ? products : [];
     let syncedCount = 0;
@@ -2153,7 +2114,7 @@ async function startServer() {
     return res.status(200).json({ success: true, syncedCount });
   });
 
-  app.post('/api/documents/sync', async (req: Request, res: Response) => {
+  app.post('/api/documents/sync', authenticateSession, async (req: Request, res: Response) => {
     const { documentType, documentId, payload } = req.body || {};
     if (!documentType || !documentId || !payload) {
       return res.status(400).json({ error: 'documentType, documentId, and payload are required.' });
@@ -2168,6 +2129,15 @@ async function startServer() {
 
   // Real-Time Server-Sent Events (SSE) Stream for Instant Cross-Device Sync (PC <-> Mobile)
   app.get('/api/erp/live-stream', async (req: Request, res: Response) => {
+    // SECURITY: the stream pushes staff + unified business state, so it requires a valid signed session.
+    // (Browser EventSource cannot set headers, so the token is accepted as ?token=.)
+    const sseToken = typeof req.query.token === 'string' ? req.query.token : '';
+    const sseHeader = req.headers['authorization'];
+    const sseBearer = typeof sseHeader === 'string' && sseHeader.startsWith('Bearer ') ? sseHeader.slice(7).trim() : '';
+    const sseSession = verifySessionToken(sseToken || sseBearer);
+    if (!sseSession && !adminApiKeyValid(sseHeader, req.headers['x-admin-key'])) {
+      return res.status(401).json({ error: 'Authentication required for live sync stream.' });
+    }
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
@@ -2220,7 +2190,7 @@ async function startServer() {
     });
   });
 
-  app.get('/api/audit/activity-state', (_req: Request, res: Response) => {
+  app.get('/api/audit/activity-state', authenticateSession, (_req: Request, res: Response) => {
     const data = firestoreAuthoritativeStore.getUserActivityAndSessionsAuthoritative();
     return res.status(200).json({
       success: true,
@@ -2228,7 +2198,7 @@ async function startServer() {
     });
   });
 
-  app.post('/api/audit/activity-log', async (req: Request, res: Response) => {
+  app.post('/api/audit/activity-log', authenticateSession, async (req: Request, res: Response) => {
     const caller = resolveOptionalCallerIdentity(req);
     const { logId, record } = req.body || {};
     if (!logId || !record || typeof record !== 'object') {
@@ -2245,7 +2215,7 @@ async function startServer() {
     return res.status(200).json({ success: ok });
   });
 
-  app.post('/api/audit/session-monitor', async (req: Request, res: Response) => {
+  app.post('/api/audit/session-monitor', authenticateSession, async (req: Request, res: Response) => {
     const caller = resolveOptionalCallerIdentity(req);
     const { record } = req.body || {};
     if (!record || typeof record !== 'object') {
@@ -2703,8 +2673,12 @@ async function startServer() {
     const transactionType: 'CustomerPayBillOnline' | 'CustomerBuyGoodsOnline' =
       rawTxType === 'CustomerBuyGoodsOnline' ? 'CustomerBuyGoodsOnline' : 'CustomerPayBillOnline';
     const origin = resolveRequestOrigin(req);
+    // SECURITY: the Host header is attacker-controlled, so prefer a pinned callback URL.
     const callbackUrl = (
-      process.env.MPESA_CALLBACK_URL || `${origin}/api/mpesa/daraja-webhook`
+      process.env.MPESA_CALLBACK_URL ||
+      (process.env.APP_URL
+        ? `${process.env.APP_URL.replace(/\/+$/, '')}/api/mpesa/daraja-webhook`
+        : `${origin}/api/mpesa/daraja-webhook`)
     ).trim();
     const webhookSecret =
       (process.env.MPESA_WEBHOOK_SECRET || '').trim() || resolvedSecrets.sessionSecret;
@@ -3389,7 +3363,7 @@ async function startServer() {
           // Confirmed via upstream Daraja STK Query; if callback hasn't arrived yet with receiptNumber,
           // check if receiptNumber was provided or wait for callback
           const candidateReceipt = String(
-            receiptNumber || record.mpesaReceiptNumber || ''
+            record.mpesaReceiptNumber || ''
           )
             .trim()
             .toUpperCase();

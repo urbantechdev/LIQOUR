@@ -12,13 +12,13 @@
 // Generate a cryptographically secure random hex salt
 export function generateCryptographicSalt(byteLength: number = 16): string {
   const bytes = new Uint8Array(byteLength);
-  if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
-    window.crypto.getRandomValues(bytes);
-  } else {
-    for (let i = 0; i < byteLength; i++) {
-      bytes[i] = Math.floor(Math.random() * 256);
-    }
+  // SECURITY: use the platform CSPRNG (browser window.crypto and Node >= 19 globalThis.crypto).
+  // Never fall back to Math.random(): this module also runs on the server for PIN salts and TOTP secrets.
+  const webCrypto = (globalThis as { crypto?: Crypto }).crypto;
+  if (!webCrypto || typeof webCrypto.getRandomValues !== 'function') {
+    throw new Error('No cryptographically secure random number generator available.');
   }
+  webCrypto.getRandomValues(bytes);
   return Array.from(bytes)
     .map(b => b.toString(16).padStart(2, '0'))
     .join('');
@@ -77,13 +77,11 @@ const BASE32_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 export function generateTotpSecret(length: number = 16): string {
   let result = '';
   const randomBytes = new Uint8Array(length);
-  if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
-    window.crypto.getRandomValues(randomBytes);
-  } else {
-    for (let i = 0; i < length; i++) {
-      randomBytes[i] = Math.floor(Math.random() * 256);
-    }
+  const webCrypto = (globalThis as { crypto?: Crypto }).crypto;
+  if (!webCrypto || typeof webCrypto.getRandomValues !== 'function') {
+    throw new Error('No cryptographically secure random number generator available.');
   }
+  webCrypto.getRandomValues(randomBytes);
   for (let i = 0; i < length; i++) {
     result += BASE32_CHARS[randomBytes[i] % 32];
   }

@@ -3610,7 +3610,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Ensure the browser always holds a valid server-signed session token for this role/department/branch
     fetch('/api/auth/terminal-session', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify({
         userId: matchedUser.id,
         name: userName,

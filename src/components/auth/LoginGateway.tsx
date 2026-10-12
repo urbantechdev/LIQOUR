@@ -33,7 +33,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { formatKes } from '../../utils/kenyaTax';
-import { setStoredSessionToken } from '../../utils/apiAuth';
+import { setStoredSessionToken, getAuthHeaders } from '../../utils/apiAuth';
 import {
   CenterScreenFeedback,
   CenterScreenFeedbackData
@@ -468,7 +468,7 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
           try {
             const termRes = await fetch('/api/auth/terminal-session', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
               body: JSON.stringify({
                 userId: cred.user.uid || `user-${verifiedEmail}`,
                 name: verifiedName,
@@ -548,7 +548,7 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
         try {
           const termRes = await fetch('/api/auth/terminal-session', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
             body: JSON.stringify({
               userId: cred.user.uid || `user-${verifiedEmail}`,
               name: verifiedName,
@@ -588,50 +588,17 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
         rawMsg.includes('Authorized domains') ||
         rawMsg.includes('authorized domain')
       ) {
-        friendlyMsg = `Domain "${window.location.hostname}" is not yet registered in Firebase Authorized domains. You can authorize it or click "Direct Admin Sign-In" below.`;
+        friendlyMsg = `Domain "${window.location.hostname}" is not yet registered in Firebase Authorized domains. Add it under Firebase Console > Authentication > Settings > Authorized domains, then try again.`;
         setIsUnauthorizedDomain(true);
       }
       setGoogleLoginError(friendlyMsg);
     }
   };
 
-  // Direct Administrator / Executive Session Sign-In (bypasses Firebase OAuth domain popup restrictions)
-  const handleDirectAdminLogin = async (targetRole: 'SUPER_ADMIN' | 'ACCOUNTANT') => {
-    setIsSubmitting(true);
-    setGoogleLoginError(null);
-    try {
-      const email = targetRole === 'SUPER_ADMIN' ? 'urbaninteriorkenya@gmail.com' : 'accountant@vaairo.co.ke';
-      const name = targetRole === 'SUPER_ADMIN' ? 'Executive Administrator' : 'Corporate Accountant';
-      const targetDept: DepartmentType = targetRole === 'ACCOUNTANT' ? 'FINANCE' : 'BRANCH_MANAGER';
-      const targetBranch = selectedBranchId || 'branch-hq-main';
-
-      const termRes = await fetch('/api/auth/terminal-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: `user-${email}`,
-          name,
-          email,
-          role: targetRole,
-          department: targetDept,
-          branchId: targetBranch
-        })
-      });
-
-      const termData = await termRes.json().catch(() => ({}));
-      if (!termRes.ok || !termData.token) {
-        throw new Error(termData?.error || 'Failed to authenticate administrator session.');
-      }
-
-      setStoredSessionToken(termData.token);
-      loginAsRole(targetRole, targetDept, targetBranch, name);
-      setIsAuthenticated(true);
-      setIsSubmitting(false);
-      if (onSuccess) onSuccess(targetRole, targetDept);
-    } catch (err: unknown) {
-      setIsSubmitting(false);
-      setGoogleLoginError(err instanceof Error ? err.message : 'Direct login failed.');
-    }
+  // SECURITY: the former credential-free "Direct Admin Sign-In" bypass was removed.
+  // Administrators must authenticate with Google (+ TOTP when enrolled) via the server-verified flow.
+  const handleDirectAdminLogin = async (_targetRole: 'SUPER_ADMIN' | 'ACCOUNTANT') => {
+    setGoogleLoginError('Direct sign-in has been disabled. Please sign in with your Google account.');
   };
 
   // Real RFC 6238 TOTP Multi-Factor Authentication Verification (Server-Authoritative)
@@ -777,7 +744,7 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
         // Local Independent Staff Database verified the salted PIN hash; ensure terminal session token is hydrated
         const termRes = await fetch('/api/auth/terminal-session', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({
             userId: targetStaffRecord.id,
             name: targetStaffRecord.name,
@@ -846,7 +813,7 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
       try {
         const termRes = await fetch('/api/auth/terminal-session', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({
             userId: res.staffRecord.id,
             name: res.staffRecord.name,
@@ -1377,26 +1344,6 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
                   </div>
                 </div>
 
-                {/* Direct Bypass Access for Administrator */}
-                <div className="pt-1">
-                  <button
-                    type="button"
-                    onClick={() => handleDirectAdminLogin(googleTargetRole)}
-                    disabled={isSubmitting}
-                    className="w-full py-3 px-4 bg-[#0A006E] hover:bg-[#060046] text-[#FFDE00] rounded-xl font-montserrat font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-md cursor-pointer disabled:opacity-50"
-                  >
-                    <ShieldCheck className="w-4 h-4 text-[#FFDE00]" />
-                    <span>
-                      {isSubmitting
-                        ? 'Signing in...'
-                        : `Instant Direct Sign-In as ${googleTargetRole === 'SUPER_ADMIN' ? 'System Administrator' : 'Corporate Accountant'}`}
-                    </span>
-                  </button>
-                  <p className="text-[10px] text-amber-900 text-center mt-1.5 font-medium">
-                    Bypasses Firebase popup domain check and authenticates immediately as <strong>{googleTargetRole === 'SUPER_ADMIN' ? 'urbaninteriorkenya@gmail.com' : 'accountant@vaairo.co.ke'}</strong>
-                  </p>
-                </div>
-
                 {/* Step-by-Step Instructions */}
                 <div className="bg-white/90 rounded-xl p-3 border border-amber-200 space-y-1.5 text-[11px] text-amber-950">
                   <div className="font-montserrat font-black text-xs text-amber-900 flex items-center gap-1">
@@ -1459,22 +1406,6 @@ export const LoginGateway: React.FC<Props> = ({ onSuccess, onClose, isOverlay = 
               </span>
             </button>
 
-            {/* Direct Instant Access Alternative */}
-            <div className="relative flex py-0.5 items-center">
-              <div className="flex-grow border-t border-slate-200"></div>
-              <span className="flex-shrink mx-3 text-[10px] uppercase font-montserrat font-bold text-slate-400">or bypass domain check</span>
-              <div className="flex-grow border-t border-slate-200"></div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => handleDirectAdminLogin(googleTargetRole)}
-              disabled={isSubmitting}
-              className="w-full py-3 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-montserrat font-bold text-xs flex items-center justify-center gap-2 transition border border-slate-700 cursor-pointer disabled:opacity-50 shadow-xs"
-            >
-              <ShieldCheck className="w-4 h-4 text-[#FFDE00]" />
-              <span>Direct Sign-In as {googleTargetRole === 'SUPER_ADMIN' ? 'System Administrator' : 'Corporate Accountant'}</span>
-            </button>
           </div>
         )}
 
