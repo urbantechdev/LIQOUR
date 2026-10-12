@@ -903,9 +903,9 @@ async function startServer() {
       department: session?.department,
       userId,
       email,
-      name: session?.name,
-      branchId: session?.branchId,
-      organizationId: session?.organizationId
+      name: session?.name || (req.body && typeof req.body.name === 'string' ? req.body.name : undefined),
+      branchId: session?.branchId || (req.body && typeof req.body.branchId === 'string' ? req.body.branchId : undefined),
+      organizationId: session?.organizationId || (req.body && typeof req.body.organizationId === 'string' ? req.body.organizationId : undefined)
     };
   }
 
@@ -1927,6 +1927,7 @@ async function startServer() {
       id: String(staffId),
       ...(rawPin ? { loginPin: String(rawPin) } : {})
     });
+    void firestoreAuthoritativeStore.persistUserRecordToFirestore(String(staffId), recObj);
     return res.status(200).json({ success: true, persisted: true, staffId: String(staffId) });
   });
 
@@ -1945,6 +1946,10 @@ async function startServer() {
         );
         if (ok) {
           syncStaffDirectoryRecordIntoPinRegistry(item as Record<string, unknown>);
+          void firestoreAuthoritativeStore.persistUserRecordToFirestore(
+            String(item.id),
+            item as Record<string, unknown>
+          );
         }
       }
     }
@@ -2111,11 +2116,11 @@ async function startServer() {
         userName: scanInfo.scannerName,
         userRole: caller.role || 'STAFF',
         department: caller.department || 'INVENTORY',
+        ipAddress: getClientIp(req),
         branchId: scanInfo.branchId,
         actionType: 'PRODUCT_BARCODE_SCANNED',
         actionTitle: `Product Barcode Scanned: ${product.name} (${product.barcode || product.sku})`,
-        module: 'INVENTORY',
-        ipAddress: getClientIp(req)
+        module: 'INVENTORY'
       });
     }
 
